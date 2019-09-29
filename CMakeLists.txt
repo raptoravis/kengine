@@ -69,3 +69,5 @@ endif()
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} PARENT_SCOPE)
 target_include_directories(kengine PUBLIC . common)
+
+add_subdirectory(example)
