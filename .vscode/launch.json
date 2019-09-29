@@ -1,0 +1,44 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "AAAAA (GDB)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/mingw/chapter01/chapter01.exe", 
+            "miDebuggerPath":"C:\\msys64\\mingw64\\bin\\gdb.exe", 
+            "args": [
+                "basic"
+            ],
+            // "args": [""],
+            "stopAtEntry": false,
+            // "cwd": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}/build/mingw/chapter01/",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            // "preLaunchTask": "compile", // task.json 中的 label
+            "preLaunchTask": "", // task.json 中的 label
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
+            "name": "AAAAA (msvc)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/win64/chapter01/Debug/chapter01.exe", 
+            "args": [
+                "basic"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/build/win64/chapter01/", 
+            "environment": [],
+            "externalConsole": false
+        },
+    ]
+}

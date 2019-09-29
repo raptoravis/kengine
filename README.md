@@ -153,12 +153,14 @@ These are helper functions to factorize typical manipulations of `Components`.
 ## ComponentFunctions
 
 ```
-This is an advanced feature and understanding this is absolutely not required to make use of the engine, although those of you looking to make the most of runtime extensibility and compile-time type-safety should be interested in this.
+This is an advanced feature and understanding this is absolutely not required to make use of the engine,
+although those of you looking to make the most of runtime extensibility and compile-time type-safety
+should be interested in this.
 ```
 
 One of the main goals of this engine is to be as runtime-extensible as possible, while also allowing developers to perform type-based metaprogramming for things such as serialization or object inspection.
 
-To make this possible, a "ComponentFunction" mechanism is in place. A `ComponentFunction` is a function pointer registered provided to the `EntityManager`, which matches a given `Component`. It will typically a function template's specialization for that `Component`. `ComponentFunctions` are provided by calling `registerComponentFunction`, and can then be accessed through `getComponentFunctionMaps`.
+To make this possible, a "ComponentFunction" mechanism is in place. A `ComponentFunction` is a function pointer provided to the `EntityManager`, which matches a given `Component` for a given functionality. It will typically be a function template's specialization for that `Component`. `ComponentFunctions` are provided by calling `registerComponentFunction`, and can then be accessed through `getComponentFunctionMaps`.
 
 The framework is a bit hard to wrap one's head around, so here is an example of a final use case:
 
