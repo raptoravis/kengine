@@ -91,8 +91,8 @@ namespace kengine {
 		if (strcmp(putils::file_extension(f), "vox") != 0)
 			return false;
 
-#ifndef NDEBUG
-		std::cout << "[MagicaVoxel] Loading " << f << "...";
+#ifndef KENGINE_NDEBUG
+		std::cout << putils::termcolor::green << "[MagicaVoxel] Loading " << putils::termcolor::cyan << f << putils::termcolor::green << "..." << putils::termcolor::reset;
 #endif
 		std::ifstream stream(f, std::ios::binary);
 		assert(stream);
@@ -149,8 +149,8 @@ namespace kengine {
 			e += OffsetAppliedComponent{};
 		}
 
-#ifndef NDEBUG
-		std::cout << " Done.\n";
+#ifndef KENGINE_NDEBUG
+		std::cout << putils::termcolor::green << " Done.\n" << putils::termcolor::reset;
 #endif
 		return true;
 	}

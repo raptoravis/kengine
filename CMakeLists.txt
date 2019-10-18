@@ -5,6 +5,11 @@ if(WIN32)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /DNOMINMAX")
 endif()
 
+if (KENGINE_OGRE AND WIN32)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /D_ITERATOR_DEBUG_LEVEL=0")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /D_ITERATOR_DEBUG_LEVEL=0" PARENT_SCOPE)
+endif()
+
 set(PUTILS_BUILD_PSE ${KENGINE_SFML})
 set(PUTILS_BUILD_LUA ${KENGINE_LUA})
 set(PUTILS_BUILD_PYTHON ${KENGINE_PYTHON})
@@ -65,6 +70,11 @@ endif()
 if (KENGINE_BULLET)
     add_subdirectory(common/systems/bullet)
     target_link_libraries(kengine PUBLIC kengine_bullet)
+endif()
+
+if (KENGINE_OGRE)
+    add_subdirectory(common/systems/ogre)
+    target_link_libraries(kengine PUBLIC kengine_ogre)
 endif()
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} PARENT_SCOPE)

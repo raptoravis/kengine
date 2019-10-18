@@ -165,7 +165,7 @@ namespace kengine {
 		glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 		glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
 
-#ifndef NDEBUG
+#ifndef KENGINE_NDEBUG
 		glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GLFW_TRUE);
 #endif
 
@@ -186,7 +186,7 @@ namespace kengine {
 		glfwSetScrollCallback(g_window, Input::scroll);
 		glfwSetKeyCallback(g_window, Input::key);
 
-#ifndef NDEBUG
+#ifndef KENGINE_NDEBUG
 		ImGui::CreateContext();
 		auto & io = ImGui::GetIO();
 		io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
@@ -217,13 +217,16 @@ namespace kengine {
 		const bool ret = glewInit();
 		assert(ret == GLEW_OK);
 
-#ifndef NDEBUG
+#ifndef KENGINE_NDEBUG
 		glEnable(GL_DEBUG_OUTPUT);
+		glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
 		glDebugMessageCallback([](GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar * message, const void * userParam) {
 			if (severity != GL_DEBUG_SEVERITY_NOTIFICATION)
-				fprintf(stderr, "GL: severity = 0x%x, message = %s\n",
-					severity, message);
-			// assert(type != GL_DEBUG_TYPE_ERROR);
+				std::cerr <<
+				putils::termcolor::red <<
+				"G: severity = 0x" << std::ios::hex << severity << std::ios::dec <<
+				", message: " << message << '\n' <<
+				putils::termcolor::reset;
 		}, nullptr);
 #endif
 	}
@@ -279,15 +282,6 @@ namespace kengine {
 		_gBuffer.getTexture(p.textureIndex, p.buff, p.buffSize);
 	}
 
-#ifndef NDEBUG
-	void OpenGLSystem::handle(kengine::packets::AddImGuiTool p) {
-		for (const auto & controller : Controllers::controllers)
-			if (strcmp(controller.name, p.name) == 0)
-				return;
-		Controllers::controllers.push_back({ p.name, &p.enabled });
-	}
-#endif
-
 	void OpenGLSystem::initShader(putils::gl::Program & p) {
 		p.init(_gBuffer.getTextureCount(), (size_t)g_params.screenSize.x, (size_t)g_params.screenSize.y, _gBuffer.getFBO());
 
@@ -319,10 +313,9 @@ namespace kengine {
 		addShaders();
 #endif
 
-#ifndef NDEBUG
+#ifndef KENGINE_NDEBUG
 		_em += [](kengine::Entity & e) { e += kengine::AdjustableComponent("[ImGui] Scale", &g_dpiScale); };
 
-		_em += Controllers::ToolsController();
 		_em += Controllers::ShaderController(_em);
 		_em += Controllers::TextureDebugger(_em, _gBuffer, _gBufferIterator);
 		_em += Controllers::MouseController(g_window);
@@ -463,7 +456,7 @@ namespace kengine {
 
 		doOpenGL();
 
-#ifndef NDEBUG
+#ifndef KENGINE_NDEBUG
 		ImGui_ImplOpenGL3_NewFrame();
 		ImGui_ImplGlfw_NewFrame();
 		ImGui::NewFrame();
@@ -556,6 +549,7 @@ namespace kengine {
 			}
 
 			g_params.camPos = ShaderHelper::toVec(cam.frustrum.position);
+			g_params.camFOV = cam.frustrum.size.y;
 
 			g_params.view = [&] {
 				const auto front = glm::normalize(glm::vec3{
@@ -571,7 +565,7 @@ namespace kengine {
 			}();
 
 			g_params.proj = glm::perspective(
-				cam.frustrum.size.y,
+				g_params.camFOV,
 				(float)g_params.screenSize.x / (float)g_params.screenSize.y,
 				g_params.nearPlane, g_params.farPlane
 			);
@@ -611,7 +605,7 @@ namespace kengine {
 				if (comp.enabled)
 					comp.shader->run(g_params);
 
-#ifndef NDEBUG
+#ifndef KENGINE_NDEBUG
 			if (Controllers::TEXTURE_TO_DEBUG != -1)
 				debugTexture(Controllers::TEXTURE_TO_DEBUG);
 #endif

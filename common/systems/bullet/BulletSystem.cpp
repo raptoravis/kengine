@@ -16,10 +16,13 @@
 #include "components/DebugGraphicsComponent.hpp"
 #include "components/ModelColliderComponent.hpp"
 #include "components/SkeletonComponent.hpp"
+#include "components/ModelSkeletonComponent.hpp"
 #include "components/ModelComponent.hpp"
 
 #include "helpers/MatrixHelper.hpp"
 #include "helpers/SkeletonHelper.hpp"
+
+#include "termcolor.hpp"
 
 #include "btBulletDynamicsCommon.h"
 #include "BulletCollision/CollisionDispatch/btGhostObject.h"
@@ -120,7 +123,7 @@ struct KengineMotionState : public btMotionState {
 	kengine::TransformComponent3f & transform;
 };
 
-#ifndef NDEBUG
+#ifndef KENGINE_NDEBUG
 namespace debug {
 	class Drawer : public btIDebugDraw {
 	public:
@@ -147,7 +150,7 @@ namespace debug {
 
 		void draw3dText(const btVector3& location, const char* textString) override {}
 
-		void reportErrorWarning(const char* warningString) override { std::cout << "[Bullet] " << warningString; }
+		void reportErrorWarning(const char* warningString) override { std::cout << putils::termcolor::red << "[Bullet] " << warningString << putils::termcolor::reset; }
 
 		void setDebugMode(int debugMode) override {}
 		int getDebugMode() const override { return DBG_DrawWireframe; }
@@ -179,7 +182,7 @@ namespace kengine {
 	{
 		onLoad("");
 
-#ifndef NDEBUG
+#ifndef KENGINE_NDEBUG
 		debug::drawer = new debug::Drawer(em);
 #endif
 
@@ -189,7 +192,7 @@ namespace kengine {
 
 	void BulletSystem::onLoad(const char * directory) noexcept {
 		_em += [](Entity & e) { e += AdjustableComponent("[Physics] Gravity", &GRAVITY); };
-#ifndef NDEBUG
+#ifndef KENGINE_NDEBUG
 		_em += [](Entity & e) { e += AdjustableComponent("[Physics] Debug", &ENABLE_DEBUG); };
 #endif
 	}
@@ -332,7 +335,7 @@ namespace kengine {
 		dynamicsWorld.setGravity({ 0.f, -GRAVITY, 0.f });
 		dynamicsWorld.stepSimulation(time.getDeltaTime().count());
 
-#ifndef NDEBUG
+#ifndef KENGINE_NDEBUG
 		debug::drawer->cleanup();
 		dynamicsWorld.setDebugDrawer(ENABLE_DEBUG ? debug::drawer : nullptr);
 		dynamicsWorld.debugDrawWorld();
