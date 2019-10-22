@@ -2,21 +2,19 @@
 #include "EntityManager.hpp"
 
 #include <OgreSceneManager.h>
-#include <OgreSceneNode.h>
-#include <OgreEntity.h>
 
+#include "OgreObjectComponent.hpp"
 #include "components/TransformComponent.hpp"
 #include "components/GraphicsComponent.hpp"
 
 #include "Utils.hpp"
-
-struct OgreObjectComponent {
-	Ogre::SceneNode * node;
-	Ogre::Entity * entity;
-};
+#include "file_extension.hpp"
 
 static void setTransform(Ogre::SceneNode & node, const kengine::TransformComponent3f & transform) {
 	node.setPosition(convert(transform.boundingBox.position));
+	node.setScale(convert(transform.boundingBox.size));
+
+	node.resetOrientation();
 	node.yaw(Ogre::Radian(transform.yaw));
 	node.pitch(Ogre::Radian(transform.pitch));
 	node.roll(Ogre::Radian(transform.roll));
@@ -26,7 +24,11 @@ ObjectManager::ObjectManager(kengine::EntityManager & em, Ogre::SceneManager & s
 	: _em(em), _sceneManager(sceneManager)
 {
 	_sceneManager.setAmbientLight(Ogre::ColourValue(.5f, .5f, .5f));
-	Ogre::ResourceGroupManager::getSingleton().addResourceLocation("resources/Sinbad.zip", "Zip");
+}
+
+void ObjectManager::execute() noexcept {
+	for (const auto & [e, transform, comp] : _em.getEntities<kengine::TransformComponent3f, OgreObjectComponent>())
+		setTransform(*comp.node, transform);
 }
 
 void ObjectManager::registerEntity(kengine::Entity & e) noexcept {
@@ -36,10 +38,13 @@ void ObjectManager::registerEntity(kengine::Entity & e) noexcept {
 	const auto & graphics = e.get<kengine::GraphicsComponent>();
 
 	OgreObjectComponent comp;
+
+	if (strcmp(putils::file_extension(graphics.appearance), "mesh") != 0)
+		return;
+
 	comp.entity = _sceneManager.createEntity(graphics.appearance.c_str());
 	comp.node = _sceneManager.getRootSceneNode()->createChildSceneNode();
 	comp.node->attachObject(comp.entity);
-	setTransform(*comp.node, e.get<kengine::TransformComponent3f>());
 
 	e += comp;
 }

@@ -1,7 +1,7 @@
 #pragma once
 
-#include <OgreApplicationContext.h>
 #include "Manager.hpp"
+#include <OgreApplicationContext.h>
 
 class InputManager : public Manager, public OgreBites::InputListener {
 public:
