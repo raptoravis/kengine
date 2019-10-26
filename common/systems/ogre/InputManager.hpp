@@ -1,7 +1,7 @@
 #pragma once
 
-#include <OgreApplicationContext.h>
 #include "Manager.hpp"
+#include <OgreApplicationContext.h>
 
 class InputManager : public Manager, public OgreBites::InputListener {
 public:
@@ -18,4 +18,5 @@ public:
 
 private:
 	kengine::EntityManager & _em;
+	OgreBites::ApplicationContext & _app;
 };

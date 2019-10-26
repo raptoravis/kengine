@@ -4,14 +4,14 @@
 
 namespace Ogre {
 	class SceneManager;
-	class RenderWindow;
 };
 
-class CameraManager : public Manager {
+class LightManager : public Manager {
 public:
-	CameraManager(kengine::EntityManager & em, Ogre::SceneManager & sceneManager, Ogre::RenderWindow & window);
+	LightManager(kengine::EntityManager & em, Ogre::SceneManager & sceneManager);
 
 	void onLoad(const char *) noexcept override;
+
 	void execute() noexcept override;
 	void registerEntity(kengine::Entity & e) noexcept override;
 	void removeEntity(kengine::Entity & e) noexcept override;
@@ -19,5 +19,4 @@ public:
 private:
 	kengine::EntityManager & _em;
 	Ogre::SceneManager & _sceneManager;
-	Ogre::RenderWindow & _window;
 };

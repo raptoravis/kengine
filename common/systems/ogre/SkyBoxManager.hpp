@@ -1,17 +1,14 @@
-
 #pragma once
 
 #include "Manager.hpp"
 
-namespace Ogre {
-	class SceneManager;
-};
+namespace Ogre { class SceneManager; }
 
-class ObjectManager : public Manager {
+class SkyBoxManager : public Manager {
 public:
-	ObjectManager(kengine::EntityManager & em, Ogre::SceneManager & sceneManager);
+	SkyBoxManager(kengine::EntityManager & em, Ogre::SceneManager & sceneManager);
 
-	void execute() noexcept override;
+private:
 	void registerEntity(kengine::Entity & e) noexcept override;
 	void removeEntity(kengine::Entity & e) noexcept override;
 
