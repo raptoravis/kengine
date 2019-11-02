@@ -37,7 +37,7 @@ namespace kengine::Shaders {
 
 		use();
 		putils::gl::setUniform(viewPos, params.camPos);
-		putils::gl::setUniform(screenSize, params.screenSize);
+		putils::gl::setUniform(screenSize, putils::Point2f(params.viewPort.size));
 
 		putils::gl::setUniform(shadow_map_min_bias, SHADOW_MAP_MIN_BIAS);
 		putils::gl::setUniform(shadow_map_max_bias, SHADOW_MAP_MAX_BIAS);
@@ -46,11 +46,13 @@ namespace kengine::Shaders {
 
 		for (auto &[e, light, transform] : _em.getEntities<SpotLightComponent, kengine::TransformComponent3f>()) {
 			const auto & centre = transform.boundingBox.position;
+			setLight(light, centre);
 
-			for (const auto & [shadowMapEntity, shader, comp] : _em.getEntities<LightingShaderComponent, ShadowMapShaderComponent>()) {
-				auto & shadowMap = static_cast<ShadowMapShader &>(*shader.shader);
-				shadowMap.run(e, light, centre, (size_t)params.screenSize.x, (size_t)params.screenSize.y);
-			}
+			if (light.castShadows)
+				for (const auto & [shadowMapEntity, shader, comp] : _em.getEntities<LightingShaderComponent, ShadowMapShaderComponent>()) {
+					auto & shadowMap = static_cast<ShadowMapShader &>(*shader.shader);
+					shadowMap.run(e, light, centre, (size_t)params.viewPort.size.x, (size_t)params.viewPort.size.y);
+				}
 
 			use();
 
@@ -67,10 +69,8 @@ namespace kengine::Shaders {
 			else
 				glCullFace(GL_FRONT);
 
-			setLight(light, centre);
-
 			glBindTexture(GL_TEXTURE_2D, e.get<DepthMapComponent>().texture);
-			putils::gl::setUniform(lightSpaceMatrix, LightHelper::getLightSpaceMatrix(light, { centre.x, centre.y, centre.z }, (size_t)params.screenSize.x, (size_t)params.screenSize.y));
+			putils::gl::setUniform(lightSpaceMatrix, LightHelper::getLightSpaceMatrix(light, { centre.x, centre.y, centre.z }, (size_t)params.viewPort.size.x, (size_t)params.viewPort.size.y));
 
 			ShaderHelper::shapes::drawSphere();
 		}
@@ -92,5 +92,7 @@ namespace kengine::Shaders {
 		putils::gl::setUniform(attenuationConstant, light.constant);
 		putils::gl::setUniform(attenuationLinear, light.linear);
 		putils::gl::setUniform(attenuationQuadratic, light.quadratic);
+
+		putils::gl::setUniform(pcfSamples, light.shadowPCFSamples);
 	}
 }

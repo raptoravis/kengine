@@ -11,7 +11,6 @@
 #include "vector.hpp"
 #include "imgui.h"
 
-#include "Manager.hpp"
 #include "InputManager.hpp"
 #include "ImGuiManager.hpp"
 #include "CameraManager.hpp"
@@ -19,8 +18,10 @@
 #include "SkyBoxManager.hpp"
 #include "ObjectManager.hpp"
 #include "AssimpObjectManager.hpp"
+#include "MagicaVoxelObjectManager.hpp"
+#include "AnimationManager.hpp"
 
-static putils::vector<Manager *, 8> g_managers;
+static putils::vector<Manager *, 16> g_managers;
 
 namespace kengine {
 	OgreSystem::OgreSystem(EntityManager & em)
@@ -53,6 +54,8 @@ namespace kengine {
 		g_managers.push_back(new SkyBoxManager(_em, *_sceneManager));
 		g_managers.push_back(new ObjectManager(_em, *_sceneManager));
 		g_managers.push_back(new AssimpObjectManager(_em, *_sceneManager));
+		g_managers.push_back(new MagicaVoxelObjectManager(_em, *_sceneManager));
+		g_managers.push_back(new AnimationManager(_em));
 	}
 
 	void OgreSystem::execute() noexcept {
@@ -67,8 +70,9 @@ namespace kengine {
 			root->clearEventTimes();
 		}
 
+		const auto deltaTime = time.getDeltaTime().count();
 		for (const auto manager : g_managers)
-			manager->execute();
+			manager->execute(deltaTime);
 
 		auto root = getRoot();
 		if (root->endRenderingQueued() || !root->renderOneFrame()) {
