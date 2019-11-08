@@ -5,7 +5,7 @@
 #include "components/OpenGLModelComponent.hpp"
 #include "components/SkeletonComponent.hpp"
 
-#include "systems/opengl/shaders/shaders.hpp"
+#include "systems/opengl/shaders/ApplyTransparencySrc.hpp"
 
 #include "common/systems/opengl/ShaderHelper.hpp"
 
@@ -19,39 +19,39 @@ namespace kengine {
 		initWithShaders<AssImpShader>(putils::make_vector(
 			ShaderDescription{ src::TexturedShader::vert, GL_VERTEX_SHADER },
 			ShaderDescription{ src::TexturedShader::frag, GL_FRAGMENT_SHADER },
-			ShaderDescription{ kengine::Shaders::src::ApplyTransparency::frag, GL_FRAGMENT_SHADER }
+			ShaderDescription{ kengine::Shaders::src::ApplyTransparency::Frag::glsl, GL_FRAGMENT_SHADER }
 		));
 
 		_diffuseTextureID = firstTextureID;
-		putils::gl::setUniform(texture_diffuse, _diffuseTextureID);
+		_texture_diffuse = _diffuseTextureID;
 
 		// _specularTextureID = _diffuseTextureID + 1;
-		// putils::gl::setUniform(texture_specular, _specularTextureID);
+		// _texture_specular = _specularTextureID;
 	}
 
 	void AssImpShader::run(const Parameters & params) {
 		use();
 
-		putils::gl::setUniform(this->view, params.view);
-		putils::gl::setUniform(this->proj, params.proj);
+		_view = params.view;
+		_proj = params.proj;
 
 		for (const auto &[e, textured, graphics, transform, skeleton] : _em.getEntities<AssImpObjectComponent, GraphicsComponent, TransformComponent3f, SkeletonComponent>()) {
 			if (graphics.model == Entity::INVALID_ID)
 				return;
 
-			putils::gl::setUniform(this->entityID, (float)e.id);
-			putils::gl::setUniform(this->color, graphics.color);
+			_entityID = (float)e.id;
+			_color = graphics.color;
 
-			AssImpHelper::Locations locations;
-			locations.model = this->model;
-			locations.bones = this->bones;
-			locations.hasTexture = this->hasTexture;
-			locations.diffuseTextureID = _diffuseTextureID;
-			locations.specularTextureID = _specularTextureID;
-			locations.specularColor = this->specularColor;
-			locations.diffuseColor = this->diffuseColor;
+			AssImpHelper::Uniforms uniforms;
+			uniforms.model = _model;
+			uniforms.bones = _bones;
+			uniforms.hasTexture = _hasTexture;
+			uniforms.diffuseTextureID = _diffuseTextureID;
+			uniforms.specularTextureID = _specularTextureID;
+			uniforms.specularColor = _specularColor;
+			uniforms.diffuseColor = _diffuseColor;
 
-			AssImpHelper::drawModel(_em, graphics, transform, skeleton, true, locations);
+			AssImpHelper::drawModel(_em, graphics, transform, skeleton, true, uniforms);
 		}
 	}
 }

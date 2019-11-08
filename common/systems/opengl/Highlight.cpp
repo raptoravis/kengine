@@ -3,7 +3,7 @@
 
 #include "components/HighlightComponent.hpp"
 
-#include "shaders/shaders.hpp"
+#include "shaders/QuadSrc.hpp"
 #include "common/systems/opengl/ShaderHelper.hpp"
 
 static const auto frag = R"(
@@ -65,7 +65,7 @@ namespace kengine::Shaders {
 
 	void Highlight::init(size_t firstTextureID, size_t screenWidth, size_t screenHeight, GLuint gBufferFBO) {
 		initWithShaders<Highlight>(putils::make_vector(
-			ShaderDescription{ src::Quad::vert, GL_VERTEX_SHADER },
+			ShaderDescription{ src::Quad::Vert::glsl, GL_VERTEX_SHADER },
 			ShaderDescription{ frag, GL_FRAGMENT_SHADER }
 		));
 	}
@@ -77,13 +77,13 @@ namespace kengine::Shaders {
 		glBlendEquation(GL_FUNC_ADD);
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-		putils::gl::setUniform(viewPos, params.camPos);
-		putils::gl::setUniform(screenSize, putils::Point2f(params.viewPort.size));
+		_viewPos = params.camPos;
+		_screenSize = putils::Point2f(params.viewPort.size);
 
 		for (const auto & [e, highlight] : _em.getEntities<HighlightComponent>()) {
-			putils::gl::setUniform(entityID, (float)e.id);
-			putils::gl::setUniform(highlightColor, highlight.color);
-			putils::gl::setUniform(intensity, highlight.intensity * 2.f - 1.f); // convert from [0,1] to [-1,1]
+			_entityID = (float)e.id;
+			_highlightColor = highlight.color;
+			_intensity = highlight.intensity * 2.f - 1.f; // convert from [0,1] to [-1,1]
 			ShaderHelper::shapes::drawQuad();
 		}
 	}

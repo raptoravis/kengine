@@ -2,38 +2,36 @@
 
 #include "EntityManager.hpp"
 #include "helpers/LightHelper.hpp"
-#include "shaders/shaders.hpp"
 
 #include "components/LightComponent.hpp"
 #include "components/AdjustableComponent.hpp"
 #include "components/ShaderComponent.hpp"
 
 #include "common/systems/opengl/ShaderHelper.hpp"
+#include "shaders/QuadSrc.hpp"
 
 namespace kengine {
-	extern float SHADOW_MAP_MIN_BIAS;
-	extern float SHADOW_MAP_MAX_BIAS;
+	static bool DEBUG_CSM = false;
 }
 
 namespace kengine::Shaders {
 	DirLight::DirLight(kengine::EntityManager & em)
 		: Program(true, pmeta_nameof(DirLight)),
 		_em(em)
-	{}
+	{
+		_em += [](kengine::Entity & e) { e += kengine::AdjustableComponent("[Render/Lights] Debug CSM", &DEBUG_CSM); };
+	}
 
 	void DirLight::init(size_t firstTextureID, size_t screenWidth, size_t screenHeight, GLuint gBufferFBO) {
 		initWithShaders<DirLight>(putils::make_vector(
-			ShaderDescription{ src::ProjViewModel::vert, GL_VERTEX_SHADER },
-			ShaderDescription{ src::ShadowMap::frag, GL_FRAGMENT_SHADER },
-			ShaderDescription{ src::DirLight::frag, GL_FRAGMENT_SHADER }
+			ShaderDescription{ src::Quad::Vert::glsl, GL_VERTEX_SHADER },
+			ShaderDescription{ src::CSM::Frag::glsl, GL_FRAGMENT_SHADER },
+			ShaderDescription{ src::DirLight::Frag::glsl, GL_FRAGMENT_SHADER }
 		));
 
 		_shadowMapTextureID = firstTextureID;
-		putils::gl::setUniform(this->shadowMap, _shadowMapTextureID);
-
-		putils::gl::setUniform(proj, glm::mat4(1.f));
-		putils::gl::setUniform(view, glm::mat4(1.f));
-		putils::gl::setUniform(model, glm::mat4(1.f));
+		for (size_t i = 0; i < lengthof(_shadowMap); ++i)
+			_shadowMap[i] = _shadowMapTextureID + i;
 	}
 
 	void DirLight::run(const Parameters & params) {
@@ -45,42 +43,47 @@ namespace kengine::Shaders {
 
 		use();
 
-		putils::gl::setUniform(viewPos, params.camPos);
-		putils::gl::setUniform(screenSize, putils::Point2f(params.viewPort.size));
+		_proj = params.proj;
+		_view = params.view;
 
-		putils::gl::setUniform(shadow_map_min_bias, SHADOW_MAP_MIN_BIAS);
-		putils::gl::setUniform(shadow_map_max_bias, SHADOW_MAP_MAX_BIAS);
-
-		glActiveTexture((GLenum)(GL_TEXTURE0 + _shadowMapTextureID));
+		_debugCSM = DEBUG_CSM;
+		_viewPos = params.camPos;
+		_screenSize = putils::Point2f(params.viewPort.size);
 
 		for (auto &[e, light] : _em.getEntities<DirLightComponent>()) {
-			setLight(light);
-
 			const putils::Point3f pos = { params.camPos.x, params.camPos.y, params.camPos.z };
 
-			if (light.castShadows) {
+			if (light.castShadows)
 				for (const auto & [shadowMapEntity, shader, comp] : _em.getEntities<LightingShaderComponent, ShadowMapShaderComponent>()) {
 					auto & shadowMap = static_cast<ShadowMapShader &>(*shader.shader);
-					shadowMap.run(e, light, pos, (size_t)params.viewPort.size.x, (size_t)params.viewPort.size.y);
+					shadowMap.run(e, light, params);
 				}
-			}
 
 			use();
+			setLight(light);
 
-			glBindTexture(GL_TEXTURE_2D, e.get<DepthMapComponent>().texture);
-			putils::gl::setUniform(lightSpaceMatrix, LightHelper::getLightSpaceMatrix(light, params.camPos, (size_t)params.viewPort.size.x, (size_t)params.viewPort.size.y));
+			const auto & depthMap = e.get<CSMComponent>();
+			for (size_t i = 0; i < lengthof(_shadowMap); ++i) {
+				glActiveTexture((GLenum)(GL_TEXTURE0 + _shadowMapTextureID + i));
+				glBindTexture(GL_TEXTURE_2D, depthMap.textures[i]);
+				_lightSpaceMatrix[i] = LightHelper::getCSMLightSpaceMatrix(light, params, i);
+			}
 
 			ShaderHelper::shapes::drawQuad();
 		}
 	}
 
 	void DirLight::setLight(const DirLightComponent & light) {
-		putils::gl::setUniform(color, light.color);
-		putils::gl::setUniform(direction, light.direction);
+		_color = light.color;
+		_direction = light.direction;
 
-		putils::gl::setUniform(ambientStrength, light.ambientStrength);
-		putils::gl::setUniform(diffuseStrength, light.diffuseStrength);
-		putils::gl::setUniform(specularStrength, light.specularStrength);
-		putils::gl::setUniform(pcfSamples, light.shadowPCFSamples);
+		_ambientStrength = light.ambientStrength;
+		_diffuseStrength = light.diffuseStrength;
+		_specularStrength = light.specularStrength;
+		_pcfSamples = light.shadowPCFSamples;
+		_bias = light.shadowMapBias;
+
+		for (size_t i = 0; i < KENGINE_CSM_COUNT; ++i)
+			_cascadeEnd[i] = LightHelper::getCSMCascadeEnd(light, i);
 	}
 }

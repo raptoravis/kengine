@@ -2,7 +2,6 @@
 
 #include "ShadowCube.hpp"
 #include "EntityManager.hpp"
-#include "shaders/shaders.hpp"
 
 #include "components/TransformComponent.hpp"
 #include "components/LightComponent.hpp"
@@ -13,20 +12,16 @@
 #include "common/systems/opengl/ShaderHelper.hpp"
 
 namespace kengine::Shaders {
-	float POINT_LIGHT_BIAS = .05f;
-
 	void PointLight::init(size_t firstTextureID, size_t screenWidth, size_t screenHeight, GLuint gBufferFBO) {
 		initWithShaders<PointLight>(putils::make_vector(
-			ShaderDescription{ src::ProjViewModel::vert, GL_VERTEX_SHADER },
-			ShaderDescription{ src::PointLight::frag, GL_FRAGMENT_SHADER },
-			ShaderDescription{ src::ShadowCube::frag, GL_FRAGMENT_SHADER }
+			ShaderDescription{ src::ProjViewModel::Vert::glsl, GL_VERTEX_SHADER },
+			ShaderDescription{ src::PointLight::Frag::glsl, GL_FRAGMENT_SHADER },
+			ShaderDescription{ src::ShadowCube::Frag::glsl, GL_FRAGMENT_SHADER }
 		));
 
 		use();
 		_shadowMapTextureID = firstTextureID;
-		putils::gl::setUniform(shadowMap, _shadowMapTextureID);
-
-		_em += [](Entity & e) { e += AdjustableComponent("[Render/Lights] Shadow cube bias", &POINT_LIGHT_BIAS); };
+		_shadowMap = _shadowMapTextureID;
 	}
 
 	void PointLight::run(const Parameters & params) {
@@ -38,9 +33,9 @@ namespace kengine::Shaders {
 		glBlendFunc(GL_ONE, GL_ONE);
 
 		use();
-		putils::gl::setUniform(bias, POINT_LIGHT_BIAS);
-		putils::gl::setUniform(viewPos, params.camPos);
-		putils::gl::setUniform(screenSize, putils::Point2f(params.viewPort.size));
+		src::ShadowCube::Frag::Uniforms::_viewPos = params.camPos;
+		assert(src::ShadowCube::Frag::Uniforms::_viewPos.location == src::PointLight::Frag::Uniforms::_viewPos.location);
+		_screenSize = putils::Point2f(params.viewPort.size);
 
 		glActiveTexture((GLenum)(GL_TEXTURE0 + _shadowMapTextureID));
 
@@ -51,18 +46,18 @@ namespace kengine::Shaders {
 			if (light.castShadows)
 				for (const auto & [shadowCubeEntity, shader, comp] : _em.getEntities<LightingShaderComponent, ShadowCubeShaderComponent>()) {
 					auto & shadowCube = static_cast<ShadowCubeShader &>(*shader.shader);
-					shadowCube.run(e, light, centre, radius, (size_t)params.viewPort.size.x, (size_t)params.viewPort.size.y);
+					shadowCube.run(e, light, centre, radius, params);
 				}
 
 			use();
 
-			putils::gl::setUniform(this->proj, params.proj);
-			putils::gl::setUniform(this->view, params.view);
+			_proj = params.proj;
+			_view = params.view;
 
 			glm::mat4 model(1.f);
 			model = glm::translate(model, { centre.x, centre.y, centre.z });
 			model = glm::scale(model, { radius, radius, radius });
-			putils::gl::setUniform(this->model, model);
+			_model = model;
 
 			if (centre.getDistanceTo({ params.camPos.x, params.camPos.y, params.camPos.z }) < radius)
 				glCullFace(GL_BACK);
@@ -80,15 +75,18 @@ namespace kengine::Shaders {
 	}
 
 	void PointLight::setLight(const PointLightComponent & light, const putils::Point3f & pos, float radius) {
-		putils::gl::setUniform(color, light.color);
-		putils::gl::setUniform(position, pos);
+		_color = light.color;
+		src::ShadowCube::Frag::Uniforms::_position = pos;
+		assert(src::ShadowCube::Frag::Uniforms::_position.location == src::PointLight::Frag::Uniforms::_position.location);
 
-		putils::gl::setUniform(diffuseStrength, light.diffuseStrength);
-		putils::gl::setUniform(specularStrength, light.specularStrength);
+		_diffuseStrength = light.diffuseStrength;
+		_specularStrength = light.specularStrength;
 
-		putils::gl::setUniform(attenuationConstant, light.constant);
-		putils::gl::setUniform(attenuationLinear, light.linear);
-		putils::gl::setUniform(attenuationQuadratic, light.quadratic);
-		putils::gl::setUniform(farPlane, radius);
+		_attenuationConstant = light.constant;
+		_attenuationLinear = light.linear;
+		_attenuationQuadratic = light.quadratic;
+		_farPlane = radius;
+
+		_bias = light.shadowMapBias;
 	}
 }

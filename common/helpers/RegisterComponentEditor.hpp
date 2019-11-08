@@ -3,7 +3,7 @@
 #include "EntityManager.hpp"
 #include "Color.hpp"
 #include "components/SelectedComponent.hpp"
-#include "reflection/Reflectible.hpp"
+#include "reflection.hpp"
 #include "functions/ImGuiEditor.hpp"
 #include "imgui.h"
 #include "magic_enum.hpp"
@@ -69,7 +69,7 @@ namespace kengine {
 
 			else if constexpr (putils::has_member_get_attributes<Member>::value) {
 				if (ImGui::TreeNode(name)) {
-					putils::for_each_attribute(Member::get_attributes(), [&member](const char * name, const auto attr) {
+					putils::for_each_attribute<Member>([&member](const char * name, const auto attr) {
 						displayAttribute(name, member.*attr);
 					});
 					ImGui::TreePop();
@@ -103,7 +103,7 @@ namespace kengine {
 		static void displayComponent(const kengine::Entity & e) {
 			if constexpr (putils::has_member_get_attributes<Comp>::value) {
 				const auto & comp = e.get<Comp>();
-				putils::for_each_attribute(Comp::get_attributes(), [&comp](const char * name, const auto member) {
+				putils::for_each_attribute<Comp>([&comp](const char * name, const auto member) {
 					displayAttribute(name, comp.*member);
 				});
 			}
@@ -116,7 +116,7 @@ namespace kengine {
 
 		template<typename MemberRef>
 		static void editAttribute(const char * name, MemberRef && member) {
-			using Member = std::decay_t<MemberRef>;
+			using Member = std::remove_reference_t<MemberRef>;
 
 			if constexpr (imguiEditor::has_member_c_str<Member>::value) {
 				displayInColumns(name, [&] {
@@ -172,7 +172,7 @@ namespace kengine {
 
 			else if constexpr (putils::has_member_get_attributes<Member>::value) {
 				if (ImGui::TreeNode(name)) {
-					putils::for_each_attribute(Member::get_attributes(), [&member](const char * name, const auto attr) {
+					putils::for_each_attribute<Member>([&member](const char * name, const auto attr) {
 						editAttribute(name, member.*attr);
 					});
 					ImGui::TreePop();
@@ -225,7 +225,7 @@ namespace kengine {
 			else if constexpr (std::is_same_v<Member, float>) {
 				displayInColumns(name, [&] {
 					ImGui::PushItemWidth(-1.f);
-					ImGui::InputFloat(getID(name, member), &member);
+					ImGui::InputFloat(getID(name, member), &member, 0.f, 0.f, "%.6f");
 					ImGui::PopItemWidth();
 				});
 			}
@@ -247,7 +247,7 @@ namespace kengine {
 		static void editComponent(kengine::Entity & e) {
 			if constexpr (putils::has_member_get_attributes<Comp>::value) {
 				auto & comp = e.get<Comp>();
-				putils::for_each_attribute(Comp::get_attributes(), [&comp](const char * name, const auto member) {
+				putils::for_each_attribute<Comp>([&comp](const char * name, const auto member) {
 					editAttribute(name, comp.*member);
 				});
 			}

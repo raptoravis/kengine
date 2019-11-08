@@ -1,5 +1,4 @@
 #include "ShadowCube.hpp"
-#include "shaders/shaders.hpp"
 
 #include "components/LightComponent.hpp"
 #include "components/DefaultShadowComponent.hpp"
@@ -12,16 +11,16 @@
 namespace kengine::Shaders {
 	void ShadowCube::init(size_t firstTextureID, size_t screenWidth, size_t screenHeight, GLuint gBufferFBO) {
 		initWithShaders<ShadowCube>(putils::make_vector(
-			ShaderDescription{ src::ProjViewModel::vert, GL_VERTEX_SHADER },
-			ShaderDescription{ src::DepthCube::geom, GL_GEOMETRY_SHADER },
-			ShaderDescription{ src::DepthCube::frag, GL_FRAGMENT_SHADER }
+			ShaderDescription{ src::ProjViewModel::Vert::glsl, GL_VERTEX_SHADER },
+			ShaderDescription{ src::DepthCube::Geom::glsl, GL_GEOMETRY_SHADER },
+			ShaderDescription{ src::DepthCube::Frag::glsl, GL_FRAGMENT_SHADER }
 		));
 
-		putils::gl::setUniform(proj, glm::mat4(1.f));
-		putils::gl::setUniform(view, glm::mat4(1.f));
+		_proj = glm::mat4(1.f);
+		_view = glm::mat4(1.f);
 	}
 
-	void ShadowCube::run(kengine::Entity & e, PointLightComponent & light, const putils::Point3f & pos, float radius, size_t screenWidth, size_t screenHeight) {
+	void ShadowCube::run(kengine::Entity & e, PointLightComponent & light, const putils::Point3f & pos, float radius, const Parameters & params) {
 		if (!e.has<DepthCubeComponent>())
 			e.attach<DepthCubeComponent>();
 
@@ -59,31 +58,24 @@ namespace kengine::Shaders {
 		use();
 
 		static struct {
-			GLint shadowMatrixUniform;
 			glm::vec3 target;
 			glm::vec3 up;
 		} directions[] = {
-			{ -1, { 1.0f, 0.0f, 0.0f }, { 0.0f, -1.0f, 0.0f } },
-			{ -1, { -1.0f, 0.0f, 0.0f }, { 0.0f, -1.0f, 0.0f } },
-			{ -1, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f } },
-			{ -1, { 0.0f, -1.0f, 0.0f }, { 0.0f, 0.0f, -1.0f } },
-			{ -1, { 0.0f, 0.0f, 1.0f }, { 0.0f, -1.0f, 0.0f } },
-			{ -1, { 0.0f, 0.0f, -1.0f }, { 0.0f, -1.0f, 0.0f } }
+			{ { 1.0f, 0.0f, 0.0f }, { 0.0f, -1.0f, 0.0f } },
+			{ { -1.0f, 0.0f, 0.0f }, { 0.0f, -1.0f, 0.0f } },
+			{ { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f } },
+			{ { 0.0f, -1.0f, 0.0f }, { 0.0f, 0.0f, -1.0f } },
+			{ { 0.0f, 0.0f, 1.0f }, { 0.0f, -1.0f, 0.0f } },
+			{ { 0.0f, 0.0f, -1.0f }, { 0.0f, -1.0f, 0.0f } }
 		};
 
 		const glm::vec3 vPos(pos.x, pos.y, pos.z);
 		const auto proj = glm::perspective(glm::radians(90.f), (float)light.shadowMapSize / (float)light.shadowMapSize, SHADOW_MAP_NEAR_PLANE, SHADOW_MAP_FAR_PLANE);
-		for (unsigned int i = 0; i < 6; ++i) {
-			if (directions[i].shadowMatrixUniform == -1) {
-				const putils::string<64> shadowMatrix("shadowMatrices[%d]", i);
-				directions[i].shadowMatrixUniform = glGetUniformLocation(getHandle(), shadowMatrix.c_str());
-				assert(directions[i].shadowMatrixUniform != -1);
-			}
-			putils::gl::setUniform(directions[i].shadowMatrixUniform, proj * glm::lookAt(vPos, vPos + directions[i].target, directions[i].up));
-		}
+		for (unsigned int i = 0; i < 6; ++i)
+			_shadowMatrices[i] = proj * glm::lookAt(vPos, vPos + directions[i].target, directions[i].up);
 
-		putils::gl::setUniform(lightPos, vPos);
-		putils::gl::setUniform(farPlane, radius);
+		_lightPos = pos;
+		_farPlane = radius;
 
 		for (const auto &[e, graphics, transform, shadow] : _em.getEntities<GraphicsComponent, TransformComponent3f, DefaultShadowComponent>()) {
 			if (graphics.model == kengine::Entity::INVALID_ID)
@@ -96,11 +88,11 @@ namespace kengine::Shaders {
 			const auto & modelInfo = modelInfoEntity.get<ModelComponent>();
 			const auto & openGL = modelInfoEntity.get<OpenGLModelComponent>();
 
-			putils::gl::setUniform(this->model, ShaderHelper::getModelMatrix(modelInfo, transform));
+			_model = ShaderHelper::getModelMatrix(modelInfo, transform);
 			ShaderHelper::drawModel(openGL);
 		}
 
-		glViewport(0, 0, (GLsizei)screenWidth, (GLsizei)screenHeight);
+		putils::gl::setViewPort(params.viewPort);
 		glCullFace(GL_BACK);
 	}
 }

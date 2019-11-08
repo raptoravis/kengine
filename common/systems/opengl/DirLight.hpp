@@ -1,6 +1,9 @@
 #pragma once
 
 #include "opengl/Program.hpp"
+#include "components/ShaderComponent.hpp"
+#include "shaders/ShadowMapSrc.hpp"
+#include "shaders/DirLightSrc.hpp"
 
 namespace kengine {
 	class EntityManager;
@@ -8,7 +11,10 @@ namespace kengine {
 }
 
 namespace kengine::Shaders {
-	class DirLight : public putils::gl::Program {
+	class DirLight : public putils::gl::Program,
+		public src::CSM::Frag::Uniforms,
+		public src::DirLight::Frag::Uniforms
+	{
 	public:
 		DirLight(kengine::EntityManager & em);
 
@@ -19,47 +25,9 @@ namespace kengine::Shaders {
 		void setLight(const DirLightComponent & light); 
 
 	public:
-		GLint proj;
-		GLint view;
-		GLint model;
-
-		// shadowMap
-		GLint lightSpaceMatrix;
-		GLint shadowMap;
-		GLint shadow_map_min_bias;
-		GLint shadow_map_max_bias;
-		GLint pcfSamples;
-
-		GLint viewPos;
-		GLint screenSize;
-
-		GLint color;
-		GLint direction;
-
-		GLint ambientStrength;
-		GLint diffuseStrength;
-		GLint specularStrength;
-
-		pmeta_get_attributes(
-			pmeta_reflectible_attribute(&DirLight::proj),
-			pmeta_reflectible_attribute(&DirLight::view),
-			pmeta_reflectible_attribute(&DirLight::model),
-
-			pmeta_reflectible_attribute(&DirLight::lightSpaceMatrix),
-			pmeta_reflectible_attribute(&DirLight::shadowMap),
-			pmeta_reflectible_attribute(&DirLight::shadow_map_min_bias),
-			pmeta_reflectible_attribute(&DirLight::shadow_map_max_bias),
-			pmeta_reflectible_attribute(&DirLight::pcfSamples),
-
-			pmeta_reflectible_attribute(&DirLight::viewPos),
-			pmeta_reflectible_attribute(&DirLight::screenSize),
-
-			pmeta_reflectible_attribute(&DirLight::color),
-			pmeta_reflectible_attribute(&DirLight::direction),
-
-			pmeta_reflectible_attribute(&DirLight::ambientStrength),
-			pmeta_reflectible_attribute(&DirLight::diffuseStrength),
-			pmeta_reflectible_attribute(&DirLight::specularStrength)
+		pmeta_get_parents(
+			pmeta_reflectible_parent(src::CSM::Frag::Uniforms),
+			pmeta_reflectible_parent(src::DirLight::Frag::Uniforms)
 		);
 
 	private:

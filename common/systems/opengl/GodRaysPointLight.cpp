@@ -9,11 +9,9 @@
 #include "common/systems/opengl/ShaderHelper.hpp"
 
 #include "ShadowCube.hpp"
-#include "shaders/shaders.hpp"
+#include "shaders/QuadSrc.hpp"
 
 namespace kengine::Shaders {
-	extern float POINT_LIGHT_BIAS;
-
 	GodRaysPointLight::GodRaysPointLight(kengine::EntityManager & em)
 		: Program(true, pmeta_nameof(GodRaysPointLight)),
 		_em(em)
@@ -22,14 +20,14 @@ namespace kengine::Shaders {
 
 	void GodRaysPointLight::init(size_t firstTextureID, size_t screenWidth, size_t screenHeight, GLuint gBufferFBO) {
 		initWithShaders<GodRaysPointLight>(putils::make_vector(
-			ShaderDescription{ src::Quad::vert, GL_VERTEX_SHADER },
-			ShaderDescription{ src::GodRays::frag, GL_FRAGMENT_SHADER },
-			ShaderDescription{ src::PointLight::GetDirection::frag, GL_FRAGMENT_SHADER },
-			ShaderDescription{ src::ShadowCube::frag, GL_FRAGMENT_SHADER }
+			ShaderDescription{ src::Quad::Vert::glsl, GL_VERTEX_SHADER },
+			ShaderDescription{ src::GodRays::Frag::glsl, GL_FRAGMENT_SHADER },
+			ShaderDescription{ src::PointLight::GetDirection::glsl, GL_FRAGMENT_SHADER },
+			ShaderDescription{ src::ShadowCube::Frag::glsl, GL_FRAGMENT_SHADER }
 		));
 
 		_shadowMapTextureID = (GLuint)firstTextureID;
-		putils::gl::setUniform(shadowMap, _shadowMapTextureID);
+		_shadowMap = _shadowMapTextureID;
 	}
 
 	void GodRaysPointLight::run(const Parameters & params) {
@@ -41,27 +39,28 @@ namespace kengine::Shaders {
 
 		glActiveTexture(GL_TEXTURE0 + _shadowMapTextureID);
 
-		putils::gl::setUniform(this->bias, POINT_LIGHT_BIAS);
-		putils::gl::setUniform(this->inverseView, glm::inverse(params.view));
-		putils::gl::setUniform(this->inverseProj, glm::inverse(params.proj));
-		putils::gl::setUniform(this->viewPos, params.camPos);
-		putils::gl::setUniform(this->screenSize, putils::Point2f(params.viewPort.size));
+		_inverseView = glm::inverse(params.view);
+		_inverseProj = glm::inverse(params.proj);
+		src::ShadowCube::Frag::Uniforms::_viewPos = params.camPos;
+		assert(src::ShadowCube::Frag::Uniforms::_viewPos.location == src::GodRays::Frag::Uniforms::_viewPos.location);
+		_screenSize = putils::Point2f(params.viewPort.size);
 
 		for (const auto &[e, light, depthMap, transform, comp] : _em.getEntities<PointLightComponent, DepthCubeComponent, TransformComponent3f, GodRaysComponent>()) {
-			putils::gl::setUniform(SCATTERING, comp.scattering);
-			putils::gl::setUniform(NB_STEPS, comp.nbSteps);
-			putils::gl::setUniform(DEFAULT_STEP_LENGTH, comp.defaultStepLength);
-			putils::gl::setUniform(INTENSITY, comp.intensity);
+			_scattering = comp.scattering;
+			_nbSteps = comp.nbSteps;
+			_defaultStepLength = comp.defaultStepLength;
+			_intensity = comp.intensity;
 			drawLight(params.camPos, light, transform.boundingBox.position, depthMap, (size_t)params.viewPort.size.x, (size_t)params.viewPort.size.y);
 		}
 	}
 
 	void GodRaysPointLight::drawLight(const glm::vec3 & camPos, const PointLightComponent & light, const putils::Point3f & pos, const DepthCubeComponent & depthMap, size_t screenWidth, size_t screenHeight) {
-		putils::gl::setUniform(color, light.color);
-		putils::gl::setUniform(position, pos);
+		_color = light.color;
+		src::ShadowCube::Frag::Uniforms::_position = pos;
+		assert(src::ShadowCube::Frag::Uniforms::_position.location == src::PointLight::GetDirection::Uniforms::_position.location);
 
 		glBindTexture(GL_TEXTURE_CUBE_MAP, depthMap.texture);
-		putils::gl::setUniform(farPlane, LightHelper::getRadius(light));
+		_farPlane = LightHelper::getRadius(light);
 
 		ShaderHelper::shapes::drawQuad();
 	}

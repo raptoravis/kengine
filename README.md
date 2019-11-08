@@ -29,7 +29,7 @@ Note that there is no `Component` class. Any type can be used as a `Component`, 
 
 ### Reflection
 
-Many parts of the engine (such as the scripting systems or the OpenGL system) make use of `putils`' [reflection API](https://github.com/phisko/putils/blob/master/reflection/Reflectible.md). Most of the components in the following samples are thus defined as reflectible.
+Many parts of the engine (such as the scripting systems or the OpenGL system) make use of `putils`' [reflection API](https://github.com/phisko/putils/blob/master/reflection.md). Most of the components in the following samples are thus defined as reflectible.
 
 ### Samples
 
@@ -59,7 +59,7 @@ Debug tools:
 Graphics:
 * [GraphicsComponent](common/components/GraphicsComponent.md): specifies the appearance of an `Entity`
 * [ModelComponent](common/components/ModelComponent.md): describes a model file (be it a 3D model, a 2D sprite or any other graphical asset)
-* [CameraComponent](common/components/CameraComponent.hpp): lets `Entities` be used as in-game cameras, to define a frustrum and position. Follows the same conventions as `TransformComponent`
+* [CameraComponent](common/components/CameraComponent.hpp): lets `Entities` be used as in-game cameras, to define a frustum and position. Follows the same conventions as `TransformComponent`
 * [GUIComponent](common/components/GUIComponent.md): lets `Entities` be used as GUI elements such as buttons, lists...)
 
 3D Graphics:

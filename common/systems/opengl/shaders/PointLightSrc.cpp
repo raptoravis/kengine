@@ -1,6 +1,7 @@
 namespace kengine::Shaders::src {
-    namespace SpotLight {
-        const char * frag = R"(
+    namespace PointLight {
+		namespace Frag {
+			const char * glsl = R"(
 #version 330
 
 uniform sampler2D gposition;
@@ -12,10 +13,6 @@ uniform vec2 screenSize;
 
 uniform vec4 color;
 uniform vec3 position;
-uniform vec3 direction;
-
-uniform float cutOff;
-uniform float outerCutOff;
 
 uniform float diffuseStrength;
 uniform float specularStrength;
@@ -28,7 +25,7 @@ out vec4 outputColor;
 
 float calcShadow(vec3 worldPos, vec3 normal, vec3 lightDir);
 
-vec3 calcSpotLight(vec3 worldPos, vec3 normal) {
+vec3 calcPointLight(vec3 worldPos, vec3 normal) {
     vec3 viewDir = normalize(viewPos - worldPos);
     vec3 lightDir = normalize(position - worldPos);
     // diffuse shading
@@ -39,16 +36,12 @@ vec3 calcSpotLight(vec3 worldPos, vec3 normal) {
     // attenuation
     float dist = length(position - worldPos);
     float attenuation = 1.0 / (attenuationConstant + attenuationLinear * dist + attenuationQuadratic * (dist * dist));    
-    // spotlight intensity
-    float theta = dot(lightDir, normalize(-direction)); 
-    float epsilon = cutOff - outerCutOff;
-    float intensity = clamp((theta - outerCutOff) / epsilon, 0.0, 1.0);
     // combine results
     float diffuse = diffuseStrength * diff;
     float specular = specularStrength * spec;
 
     float shadow = calcShadow(worldPos, normal, lightDir);
-    return color.rgb * (1.0 - shadow) * (diffuse + specular) * attenuation * intensity;
+    return color.rgb * (1.0 - shadow) * (diffuse + specular) * attenuation;
 }
 
 void main() {
@@ -59,9 +52,22 @@ void main() {
 
 	if (objectColor.a == 0) { // If 1, should not apply lighting, only drawn by DirLight
 		outputColor = vec4(objectColor.rgb, 1.0);
-		outputColor = outputColor * vec4(calcSpotLight(worldPos, normal), 1.0);
+		outputColor = outputColor * vec4(calcPointLight(worldPos, normal), 1.0);
 	}
 }
-        )";
+			)";
+		}
+
+        namespace GetDirection {
+            const char * glsl = R"(
+#version 330
+
+uniform vec3 position;
+
+vec3 getLightDirection(vec3 worldPos) {
+    return normalize(position - worldPos);
+}
+            )";
+        }
     }
 }

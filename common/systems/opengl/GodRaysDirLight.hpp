@@ -1,15 +1,23 @@
 #pragma once
 
 #include "opengl/Program.hpp"
+#include "opengl/Uniform.hpp"
+#include "components/ShaderComponent.hpp"
+#include "shaders/GodRaysSrc.hpp"
+#include "shaders/ShadowMapSrc.hpp"
+#include "shaders/DirLightSrc.hpp"
 
 namespace kengine {
 	class EntityManager;
 	struct DirLightComponent;
-	struct DepthMapComponent;
 }
 
 namespace kengine::Shaders {
-	class GodRaysDirLight : public putils::gl::Program {
+	class GodRaysDirLight : public putils::gl::Program,
+		public src::GodRays::Frag::Uniforms,
+		public src::CSM::Frag::Uniforms,
+		public src::DirLight::GetDirection::Uniforms
+	{
 	public:
 		GodRaysDirLight(kengine::EntityManager & em);
 
@@ -17,45 +25,17 @@ namespace kengine::Shaders {
 		void run(const Parameters & params) override;
 		
 	private:
-		void drawLight(const glm::vec3 & camPos, const DirLightComponent & light, const DepthMapComponent & depthMap, size_t screenWidth, size_t screenHeight);
+		void drawLight(const DirLightComponent & light, const CSMComponent & depthMap, const Parameters & params);
 
 	private:
 		kengine::EntityManager & _em;
 		GLuint _shadowMapTextureID;
 
 	public:
-		GLint SCATTERING;
-		GLint NB_STEPS;
-		GLint DEFAULT_STEP_LENGTH;
-		GLint INTENSITY;
-
-		GLint inverseView;
-		GLint inverseProj;
-		GLint viewPos;
-		GLint screenSize;
-
-		GLint color;
-		GLint direction;
-
-		GLint shadowMap;
-		GLint lightSpaceMatrix;
-
-		pmeta_get_attributes(
-			pmeta_reflectible_attribute(&GodRaysDirLight::SCATTERING),
-			pmeta_reflectible_attribute(&GodRaysDirLight::NB_STEPS),
-			pmeta_reflectible_attribute(&GodRaysDirLight::DEFAULT_STEP_LENGTH),
-			pmeta_reflectible_attribute(&GodRaysDirLight::INTENSITY),
-
-			pmeta_reflectible_attribute(&GodRaysDirLight::inverseView),
-			pmeta_reflectible_attribute(&GodRaysDirLight::inverseProj),
-			pmeta_reflectible_attribute(&GodRaysDirLight::viewPos),
-			pmeta_reflectible_attribute(&GodRaysDirLight::screenSize),
-
-			pmeta_reflectible_attribute(&GodRaysDirLight::color),
-			pmeta_reflectible_attribute(&GodRaysDirLight::direction),
-
-			pmeta_reflectible_attribute(&GodRaysDirLight::shadowMap),
-			pmeta_reflectible_attribute(&GodRaysDirLight::lightSpaceMatrix)
+		pmeta_get_parents(
+			pmeta_reflectible_parent(src::GodRays::Frag::Uniforms),
+			pmeta_reflectible_parent(src::CSM::Frag::Uniforms),
+			pmeta_reflectible_parent(src::DirLight::GetDirection::Uniforms)
 		);
 	};
 }

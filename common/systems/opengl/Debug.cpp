@@ -5,7 +5,7 @@
 #include "components/TransformComponent.hpp"
 
 #include "common/systems/opengl/ShaderHelper.hpp"
-#include "shaders/shaders.hpp"
+#include "shaders/ApplyTransparencySrc.hpp"
 
 static const char * vert = R"(
 #version 330
@@ -65,20 +65,20 @@ namespace kengine::Shaders {
 		initWithShaders<Debug>(putils::make_vector(
 			ShaderDescription{ vert, GL_VERTEX_SHADER },
 			ShaderDescription{ frag, GL_FRAGMENT_SHADER },
-			ShaderDescription{ src::ApplyTransparency::frag, GL_FRAGMENT_SHADER }
+			ShaderDescription{ src::ApplyTransparency::Frag::glsl, GL_FRAGMENT_SHADER }
 		));
 	}
 
 	void Debug::run(const Parameters & params) {
 		use();
 
-		putils::gl::setUniform(this->view, params.view);
-		putils::gl::setUniform(this->proj, params.proj);
-		putils::gl::setUniform(this->viewPos, params.camPos);
+		_view = params.view;
+		_proj = params.proj;
+		_viewPos = params.camPos;
 
 		for (const auto &[e, debug, transform] : _em.getEntities<kengine::DebugGraphicsComponent, kengine::TransformComponent3f>()) {
-			putils::gl::setUniform(this->color, debug.color);
-			putils::gl::setUniform(this->entityID, (float)e.id);
+			_color = debug.color;
+			_entityID = (float)e.id;
 
 			if (debug.debugType == DebugGraphicsComponent::Line) {
 				glm::mat4 model(1.f);
@@ -86,7 +86,7 @@ namespace kengine::Shaders {
 				model = glm::rotate(model, transform.roll, { 0.f, 0.f, 1.f });
 				model = glm::rotate(model, transform.yaw, { 0.f, 1.f, 0.f });
 				model = glm::rotate(model, transform.pitch, { 1.f, 0.f, 0.f });
-				putils::gl::setUniform(this->model, model);
+				_model = model;
 
 				ShaderHelper::shapes::drawLine({ 0.f, 0.f, 0.f }, ShaderHelper::toVec(debug.offset.position));
 			}
@@ -97,7 +97,7 @@ namespace kengine::Shaders {
 				model = glm::rotate(model, transform.yaw, { 0.f, 1.f, 0.f });
 				model = glm::rotate(model, transform.pitch, { 1.f, 0.f, 0.f });
 				model = glm::scale(model, ShaderHelper::toVec(transform.boundingBox.size * debug.offset.size));
-				putils::gl::setUniform(this->model, model);
+				_model = model;
 
 				if (debug.debugType == DebugGraphicsComponent::Box)
 					ShaderHelper::shapes::drawCube();

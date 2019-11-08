@@ -283,7 +283,7 @@ namespace kengine {
 			}
 	}
 
-	void OpenGLSystem::handle(packets::VertexDataAttributeIterator p) {
+	void OpenGLSystem::handle(packets::GBufferTexturesIterator p) {
 		_gBufferIterator = p;
 	}
 
@@ -344,16 +344,34 @@ namespace kengine {
 		_em += Controllers::TextureDebugger(_em, _gBuffer, _gBufferIterator);
 #endif
 
-		for (const auto &[e, depthMap] : _em.getEntities<DepthMapComponent>())
+		for (const auto &[e, depthMap] : _em.getEntities<CSMComponent>()) {
 			glDeleteFramebuffers(1, &depthMap.fbo);
-		for (const auto &[e, depthCube] : _em.getEntities<DepthCubeComponent>())
+			depthMap.fbo = -1;
+			glDeleteTextures(lengthof(depthMap.textures), depthMap.textures);
+			for (auto & texture : depthMap.textures)
+				texture = -1;
+		}
+		for (const auto &[e, depthMap] : _em.getEntities<DepthMapComponent>()) {
+			glDeleteFramebuffers(1, &depthMap.fbo);
+			depthMap.fbo = -1;
+			glDeleteTextures(1, &depthMap.texture);
+			depthMap.texture = -1;
+		}
+		for (const auto &[e, depthCube] : _em.getEntities<DepthCubeComponent>()) {
 			glDeleteFramebuffers(1, &depthCube.fbo);
+			depthCube.fbo = -1;
+			glDeleteTextures(1, &depthCube.texture);
+			depthCube.texture = -1;
+		}
 
 		for (const auto & [e, modelInfo] : _em.getEntities<OpenGLModelComponent>())
-			for (const auto & mesh : modelInfo.meshes) {
+			for (auto & mesh : modelInfo.meshes) {
 				glDeleteVertexArrays(1, &mesh.vertexArrayObject);
+				mesh.vertexArrayObject = -1;
 				glDeleteBuffers(1, &mesh.vertexBuffer);
+				mesh.vertexBuffer = -1;
 				glDeleteBuffers(1, &mesh.indexBuffer);
+				mesh.indexBuffer = -1;
 			}
 	}
 
@@ -557,6 +575,23 @@ namespace kengine {
 		dst[2] = z;
 	}
 
+	struct ShaderProfiler {
+		ShaderProfiler(Entity & e) {
+			if (!e.has<Controllers::ShaderProfileComponent>())
+				_comp = &e.attach<Controllers::ShaderProfileComponent>();
+			else
+				_comp = &e.get<Controllers::ShaderProfileComponent>();
+			_timer.restart();
+		}
+
+		~ShaderProfiler() {
+			_comp->executionTime = _timer.getTimeSinceStart().count();
+		}
+
+		Controllers::ShaderProfileComponent * _comp;
+		putils::Timer _timer;
+	};
+
 	void OpenGLSystem::doOpenGL() noexcept {
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -571,14 +606,14 @@ namespace kengine {
 				);
 			}
 
-			g_params.camPos = ShaderHelper::toVec(cam.frustrum.position);
-			g_params.camFOV = cam.frustrum.size.y;
+			g_params.camPos = ShaderHelper::toVec(cam.frustum.position);
+			g_params.camFOV = cam.frustum.size.y;
 
 			g_params.view = [&] {
 				const auto front = glm::normalize(glm::vec3{
-					std::cos(cam.yaw) * std::cos(cam.pitch),
+					std::sin(cam.yaw) * std::cos(cam.pitch),
 					std::sin(cam.pitch),
-					std::sin(cam.yaw) * std::cos(cam.pitch)
+					std::cos(cam.yaw) * std::cos(cam.pitch)
 				});
 				const auto right = glm::normalize(glm::cross(front, { 0.f, 1.f, 0.f }));
 				auto up = glm::normalize(glm::cross(right, front));
@@ -589,7 +624,7 @@ namespace kengine {
 
 			g_params.proj = glm::perspective(
 				g_params.camFOV,
-				(float)g_params.viewPort.size.x / (float)g_params.viewPort.size.y,
+				((float)g_params.viewPort.size.x * transform.boundingBox.size.x) / ((float)g_params.viewPort.size.y * transform.boundingBox.size.y),
 				g_params.nearPlane, g_params.farPlane
 			);
 
@@ -598,35 +633,41 @@ namespace kengine {
 				glClear(GL_DEPTH_BUFFER_BIT);
 			}
 
+			for (const auto &[e, depthMap] : _em.getEntities<CSMComponent>()) {
+				ShaderHelper::BindFramebuffer b(depthMap.fbo);
+				for (const auto texture : depthMap.textures) {
+					glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, texture, 0);
+					glClear(GL_DEPTH_BUFFER_BIT);
+				}
+			}
+
 			for (const auto &[e, depthCube] : _em.getEntities<DepthCubeComponent>()) {
 				ShaderHelper::BindFramebuffer b(depthCube.fbo);
 				glClear(GL_DEPTH_BUFFER_BIT);
 			}
 
+			static const auto runShaders = [](auto && shaders) {
+				for (auto & [e, comp] : shaders)
+					if (comp.enabled) {
+						ShaderProfiler _(e);
+						comp.shader->run(g_params);
+					}
+			};
+
 			_gBuffer.bindForWriting(); {
 				glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
 				ShaderHelper::Enable depth(GL_DEPTH_TEST);
-				for (const auto &[e, comp] : _em.getEntities<GBufferShaderComponent>())
-					if (comp.enabled)
-						comp.shader->run(g_params);
+				runShaders(_em.getEntities<GBufferShaderComponent>());
 			} _gBuffer.bindForReading();
 
 			glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 			glBlitFramebuffer(0, 0, (GLint)g_params.viewPort.size.x, (GLint)g_params.viewPort.size.y, 0, 0, (GLint)g_params.viewPort.size.x, (GLint)g_params.viewPort.size.y, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
 
 			glBindFramebuffer(GL_FRAMEBUFFER, 0);
-			for (const auto &[e, comp] : _em.getEntities<LightingShaderComponent>())
-				if (comp.enabled)
-					comp.shader->run(g_params);
 
-			for (const auto &[e, comp] : _em.getEntities<PostLightingShaderComponent>())
-				if (comp.enabled)
-					comp.shader->run(g_params);
-
-			for (const auto &[e, comp] : _em.getEntities<PostProcessShaderComponent>())
-				if (comp.enabled)
-					comp.shader->run(g_params);
+			runShaders(_em.getEntities<LightingShaderComponent>());
+			runShaders(_em.getEntities<PostLightingShaderComponent>());
+			runShaders(_em.getEntities<PostProcessShaderComponent>());
 
 #ifndef KENGINE_NDEBUG
 			if (Controllers::TEXTURE_TO_DEBUG != -1)
@@ -657,14 +698,14 @@ namespace kengine {
 			if (!ImGui::GetIO().WantCaptureMouse) {
 				if (comp.onMouseButton != nullptr)
 					for (const auto & click : Input::clicks)
-						comp.onMouseButton(click.button, click.pos.x, click.pos.y, click.pressed);
+						 comp.onMouseButton(click.button, click.pos, click.pressed);
 
 				if (comp.onMouseMove != nullptr)
 					for (const auto & pos : Input::positions)
-						comp.onMouseMove(pos.pos.x, pos.pos.y, pos.rel.x, pos.rel.y);
+						comp.onMouseMove(pos.pos, pos.rel);
 				if (comp.onMouseWheel != nullptr)
 					for (const auto delta : Input::scrolls)
-						comp.onMouseWheel(delta, 0.f, 0.f);
+						comp.onMouseWheel(delta, {});
 			}
 		}
 		Input::keys.clear();

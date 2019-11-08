@@ -1,6 +1,9 @@
 #pragma once
 
 #include "opengl/Program.hpp"
+#include "shaders/ProjViewModelSrc.hpp"
+#include "shaders/ShadowCubeSrc.hpp"
+#include "shaders/PointLightSrc.hpp"
 
 namespace kengine {
 	class EntityManager;
@@ -10,7 +13,11 @@ namespace kengine {
 namespace kengine::Shaders {
 	class ShadowCube;
 
-	class PointLight : public putils::gl::Program {
+	class PointLight : public putils::gl::Program,
+		public src::ProjViewModel::Vert::Uniforms,
+		public src::ShadowCube::Frag::Uniforms,
+		public src::PointLight::Frag::Uniforms
+	{
 	public:
 		PointLight(kengine::EntityManager & em)
 			: Program(true, pmeta_nameof(PointLight)), _em(em)
@@ -20,49 +27,12 @@ namespace kengine::Shaders {
 		void run(const Parameters & params) override;
 
 	public:
-		GLint proj;
-		GLint view;
-		GLint model;
-
-		GLint viewPos;
-		GLint screenSize;
-
-		GLint color;
-		GLint position;
-
-		GLint diffuseStrength;
-		GLint specularStrength;
-
-		GLint attenuationConstant;
-		GLint attenuationLinear;
-		GLint attenuationQuadratic;
-
-		GLint shadowMap;
-		GLint farPlane;
-		GLint bias;
-
-		pmeta_get_attributes(
-			pmeta_reflectible_attribute(&PointLight::proj),
-			pmeta_reflectible_attribute(&PointLight::view),
-			pmeta_reflectible_attribute(&PointLight::model),
-
-			pmeta_reflectible_attribute(&PointLight::viewPos),
-			pmeta_reflectible_attribute(&PointLight::screenSize),
-
-			pmeta_reflectible_attribute(&PointLight::color),
-			pmeta_reflectible_attribute(&PointLight::position),
-
-			pmeta_reflectible_attribute(&PointLight::diffuseStrength),
-			pmeta_reflectible_attribute(&PointLight::specularStrength),
-
-			pmeta_reflectible_attribute(&PointLight::attenuationConstant),
-			pmeta_reflectible_attribute(&PointLight::attenuationLinear),
-			pmeta_reflectible_attribute(&PointLight::attenuationQuadratic),
-
-			pmeta_reflectible_attribute(&PointLight::shadowMap),
-			pmeta_reflectible_attribute(&PointLight::farPlane),
-			pmeta_reflectible_attribute(&PointLight::bias)
+		pmeta_get_parents(
+			pmeta_reflectible_parent(src::ProjViewModel::Vert::Uniforms),
+			pmeta_reflectible_parent(src::ShadowCube::Frag::Uniforms),
+			pmeta_reflectible_parent(src::PointLight::Frag::Uniforms)
 		);
+
 	private:
 		kengine::EntityManager & _em;
 		size_t _shadowMapTextureID;

@@ -1,6 +1,9 @@
 #pragma once
 
 #include "opengl/Program.hpp"
+#include "shaders/GodRaysSrc.hpp"
+#include "shaders/ShadowCubeSrc.hpp"
+#include "shaders/PointLightSrc.hpp"
 
 namespace kengine {
 	class EntityManager;
@@ -9,7 +12,11 @@ namespace kengine {
 }
 
 namespace kengine::Shaders {
-	class GodRaysPointLight : public putils::gl::Program {
+	class GodRaysPointLight : public putils::gl::Program,
+		public src::ShadowCube::Frag::Uniforms,
+		public src::GodRays::Frag::Uniforms,
+		public src::PointLight::GetDirection::Uniforms
+	{
 	public:
 		GodRaysPointLight(kengine::EntityManager & em);
 
@@ -24,40 +31,10 @@ namespace kengine::Shaders {
 		GLuint _shadowMapTextureID;
 
 	public:
-		GLint SCATTERING;
-		GLint NB_STEPS;
-		GLint DEFAULT_STEP_LENGTH;
-		GLint INTENSITY;
-
-		GLint inverseView;
-		GLint inverseProj;
-		GLint viewPos;
-		GLint screenSize;
-
-		GLint color;
-		GLint position;
-		GLint farPlane;
-
-		GLint shadowMap;
-		GLint bias;
-
-		pmeta_get_attributes(
-			pmeta_reflectible_attribute(&GodRaysPointLight::SCATTERING),
-			pmeta_reflectible_attribute(&GodRaysPointLight::NB_STEPS),
-			pmeta_reflectible_attribute(&GodRaysPointLight::DEFAULT_STEP_LENGTH),
-			pmeta_reflectible_attribute(&GodRaysPointLight::INTENSITY),
-
-			pmeta_reflectible_attribute(&GodRaysPointLight::inverseView),
-			pmeta_reflectible_attribute(&GodRaysPointLight::inverseProj),
-			pmeta_reflectible_attribute(&GodRaysPointLight::viewPos),
-			pmeta_reflectible_attribute(&GodRaysPointLight::screenSize),
-
-			pmeta_reflectible_attribute(&GodRaysPointLight::color),
-			pmeta_reflectible_attribute(&GodRaysPointLight::position),
-			pmeta_reflectible_attribute(&GodRaysPointLight::farPlane),
-
-			pmeta_reflectible_attribute(&GodRaysPointLight::shadowMap),
-			pmeta_reflectible_attribute(&GodRaysPointLight::bias)
+		pmeta_get_parents(
+			pmeta_reflectible_parent(src::ShadowCube::Frag::Uniforms),
+			pmeta_reflectible_parent(src::GodRays::Frag::Uniforms),
+			pmeta_reflectible_parent(src::PointLight::GetDirection::Uniforms)
 		);
 	};
 }
