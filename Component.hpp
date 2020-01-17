@@ -4,11 +4,7 @@
 # define KENGINE_COMPONENT_CHUNK_SIZE 64
 #endif
 
-#ifndef KENGINE_MAX_SAVE_PATH_LENGTH
-# define KENGINE_MAX_SAVE_PATH_LENGTH 64
-#endif
-
-#ifndef NDEBUG
+#ifndef KENGINE_NDEBUG
 #include <iostream>
 #endif
 
@@ -21,14 +17,10 @@
 #include <memory>
 #include <vector>
 #include "meta/type.hpp"
-#include "reflection/Reflectible.hpp"
-#include "not_serializable.hpp"
+#include "reflection.hpp"
 #include "string.hpp"
 #include "vector.hpp"
-
-#ifndef KENGINE_MAX_COMPONENT_FUNCTIONS
-# define KENGINE_MAX_COMPONENT_FUNCTIONS 8
-#endif
+#include "termcolor.hpp"
 
 namespace kengine {
 	namespace detail {
@@ -37,56 +29,17 @@ namespace kengine {
 		using WriteLock = std::lock_guard<Mutex>;
 	}
 
-	struct FunctionMap {
-		const char * name = nullptr;
-
-		// In the following functions, `Func` must inherit from kengine::functions::BaseFunction, i.e. have:
-		//		a `Signature` type alias for a function pointer type
-		//		a `Signature funcPtr;` attribute
-		template<typename Func>
-		typename Func::Signature getFunction() const {
-			detail::ReadLock l(_mutex);
-			for (const auto & f : _funcs)
-				if (f.id == pmeta::type<Func>::index)
-					return (typename Func::Signature)f.funcPtr;
-			return nullptr;
-		}
-
-		template<typename Func>
-		void registerFunction(Func func) {
-			{
-				detail::ReadLock l(_mutex);
-				for (const auto & f : _funcs)
-					if (f.id == pmeta::type<Func>::index)
-						return;
-			}
-			detail::WriteLock l(_mutex);
-			_funcs.push_back(Function{ pmeta::type<Func>::index, func.funcPtr });
-		}
-
-	private:
-		struct Function {
-			pmeta::type_index id = -1;
-			void * funcPtr = nullptr;
-		};
-		putils::vector<Function, KENGINE_MAX_COMPONENT_FUNCTIONS> _funcs;
-		mutable detail::Mutex _mutex;
-	};
-
 	namespace detail {
 		static constexpr size_t INVALID = (size_t)-1;
 
 		struct MetadataBase {
+			size_t id = detail::INVALID;
+			size_t typeEntityID = detail::INVALID;
 			virtual ~MetadataBase() = default;
-			virtual bool save(const char * directory) const = 0;
-			virtual bool load(const char * directory) = 0;
-			virtual size_t getId() const = 0;
-
-			FunctionMap funcs;
 		};
 
 		struct GlobalCompMap {
-			std::unordered_map<pmeta::type_index, std::unique_ptr<MetadataBase>> map;
+			std::unordered_map<putils::meta::type_index, std::unique_ptr<MetadataBase>> map;
 			detail::Mutex mutex;
 		};
 		extern GlobalCompMap * components;
@@ -99,102 +52,39 @@ namespace kengine {
 
 		struct Metadata : detail::MetadataBase {
 			std::vector<Chunk> chunks;
-			size_t id = detail::INVALID;
 			mutable detail::Mutex _mutex;
-
-			bool save(const char * directory) const final {
-				if constexpr (putils::has_member_get_class_name<Comp>::value && !std::is_base_of<kengine::not_serializable, Comp>::value) {
-					putils::string<KENGINE_MAX_SAVE_PATH_LENGTH> file("%s/%s.bin", directory, Comp::get_class_name());
-					std::ofstream f(file.c_str());
-
-					if (!f)
-						return false;
-
-					detail::ReadLock l(_mutex);
-					const auto size = chunks.size();
-					f.write((const char *)&size, sizeof(size));
-					for (const auto & chunk : chunks) {
-						const bool empty = chunk.empty();
-						f.write((const char *)&empty, sizeof(empty));
-						if (!empty)
-							f.write((const char *)chunk.data(), KENGINE_COMPONENT_CHUNK_SIZE * sizeof(Comp));
-					}
-					return true;
-				}
-				return false;
-			}
-
-			bool load(const char * directory) final {
-				if constexpr (putils::has_member_get_class_name<Comp>::value && !std::is_base_of<kengine::not_serializable, Comp>::value) {
-					putils::string<KENGINE_MAX_SAVE_PATH_LENGTH> file("%s/%s.bin", directory, Comp::get_class_name());
-					std::ifstream f(file.c_str());
-					if (!f)
-						return false;
-
-					size_t size;
-					f.read((char *)&size, sizeof(size));
-
-					size_t i = 0;
-					{
-						detail::ReadLock l(_mutex);
-						// Read into already allocated chunks
-						for (; i < size && i < chunks.size(); ++i) {
-							bool empty;
-							f.read((char *)&empty, sizeof(empty));
-							if (!empty) {
-								if (chunks[i].empty())
-									chunks[i].resize(KENGINE_COMPONENT_CHUNK_SIZE);
-								f.read((char *)chunks[i].data(), KENGINE_COMPONENT_CHUNK_SIZE * sizeof(Comp));
-							}
-							++i;
-						}
-					}
-
-					{
-						detail::WriteLock l(_mutex);
-						// Allocate necessary new chunks
-						for (; i < size; ++i) {
-							chunks.emplace_back(0);
-							bool empty;
-							f.read((char *)&empty, sizeof(empty));
-							if (!empty) {
-								if (chunks[i].empty())
-									chunks.back().resize(KENGINE_COMPONENT_CHUNK_SIZE);
-								f.read((char *)chunks.back().data(), KENGINE_COMPONENT_CHUNK_SIZE * sizeof(Comp));
-							}
-						}
-					}
-					return true;
-				}
-				return false;
-			}
-
-			size_t getId() const final { return id;  }
 		};
 
 	public:
-		static Comp & get(size_t id) { static auto & meta = metadata();
-			detail::ReadLock r(meta._mutex);
-
-			if (id >= meta.chunks.size() * KENGINE_COMPONENT_CHUNK_SIZE) {
-				r.unlock(); { // Unlock read so we can get write
-					detail::WriteLock l(meta._mutex);
-					while (id >= meta.chunks.size() * KENGINE_COMPONENT_CHUNK_SIZE)
-						meta.chunks.emplace_back(0);
-					// Only populate the chunk we need
-					meta.chunks.back().resize(KENGINE_COMPONENT_CHUNK_SIZE);
-				} r.lock(); // Re-lock read
+		static Comp & get(size_t id) {
+			if constexpr (std::is_empty<Comp>()) {
+				static Comp ret;
+				return ret;
 			}
+			else {
+				static auto & meta = metadata();
+				detail::ReadLock r(meta._mutex);
 
-			auto & currentChunk = meta.chunks[id / KENGINE_COMPONENT_CHUNK_SIZE];
-			if (currentChunk.empty()) {
-				r.unlock(); {
-					detail::WriteLock l(meta._mutex);
-					currentChunk.resize(KENGINE_COMPONENT_CHUNK_SIZE);
-				} r.lock();
+				if (id >= meta.chunks.size() * KENGINE_COMPONENT_CHUNK_SIZE) {
+					r.unlock(); { // Unlock read so we can get write
+						detail::WriteLock l(meta._mutex);
+						while (id >= meta.chunks.size() * KENGINE_COMPONENT_CHUNK_SIZE)
+							meta.chunks.emplace_back();
+						// Only populate the chunk we need
+						meta.chunks.back().resize(KENGINE_COMPONENT_CHUNK_SIZE);
+					} r.lock(); // Re-lock read
+				}
+
+				auto & currentChunk = meta.chunks[id / KENGINE_COMPONENT_CHUNK_SIZE];
+				if (currentChunk.empty()) {
+					r.unlock(); {
+						detail::WriteLock l(meta._mutex);
+						currentChunk.resize(KENGINE_COMPONENT_CHUNK_SIZE);
+					} r.lock();
+				}
+
+				return currentChunk[id % KENGINE_COMPONENT_CHUNK_SIZE];
 			}
-
-			return currentChunk[id % KENGINE_COMPONENT_CHUNK_SIZE];
 		}
 
 		static size_t id() {
@@ -203,19 +93,32 @@ namespace kengine {
 		}
 
 		template<typename Func>
-		static auto getFunction() { static auto & meta = metadata();
-			return meta.funcs.getFunction<Func>(name);
+		static size_t initTypeEntityID(Func && createEntity) {
+			auto & meta = metadata();
+			detail::ReadLock l(meta._mutex);
+			if (meta.typeEntityID == detail::INVALID) {
+				l.unlock();
+				detail::WriteLock l2(meta._mutex);
+				if (meta.typeEntityID == detail::INVALID) // Might have been set by another thread between unlock() and lock()
+					meta.typeEntityID = createEntity();
+			}
+			return meta.typeEntityID;
 		}
 
 		template<typename Func>
-		static void registerFunction(Func func) { static auto & meta = metadata();
-			meta.funcs.registerFunction(func);
+		static size_t typeEntityID(Func && createEntity) {
+			static size_t ret = initTypeEntityID(createEntity);
+			return ret;
+		}
+
+		static void setTypeEntityID(size_t id) {
+			metadata().typeEntityID = id;
 		}
 
 	private:
 		static inline Metadata & metadata() {
 			static Metadata * ret = [] {
-				const auto typeIndex = pmeta::type<Comp>::index;
+				const auto typeIndex = putils::meta::type<Comp>::index;
 
 				{
 					detail::ReadLock l(detail::components->mutex);
@@ -232,21 +135,13 @@ namespace kengine {
 					ptr->id = detail::components->map.size() - 1;
 				}
 
-				ptr->funcs.name = getName();
-#ifndef NDEBUG
-				std::cout << ptr->id << ' ' << ptr->funcs.name << '\n';
+#ifndef KENGINE_NDEBUG
+				std::cout << putils::termcolor::green << ptr->id << ' ' << putils::termcolor::cyan << putils::reflection::get_class_name<Comp>() << '\n' << putils::termcolor::reset;
 #endif
 				return ptr;
 			}();
 
 			return *ret;
-		}
-
-		static const char * getName() {
-			if constexpr (putils::has_member_get_class_name<Comp>::value)
-				return Comp::get_class_name();
-			else
-				return typeid(Comp).name();
 		}
 	};
 }

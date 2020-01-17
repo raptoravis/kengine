@@ -4,7 +4,7 @@
 #include <bitset>
 #include <cstddef>
 #include "Component.hpp"
-#include "reflection/Reflectible.hpp"
+#include "reflection.hpp"
 
 #ifndef KENGINE_COMPONENT_COUNT
 # define KENGINE_COMPONENT_COUNT 64
@@ -54,13 +54,13 @@ namespace kengine {
 		}
 
 	public:
-		pmeta_get_class_name(EntityView);
-		pmeta_get_attributes(
-			pmeta_reflectible_attribute(&EntityView::id),
-			pmeta_reflectible_attribute(&EntityView::componentMask)
+		putils_reflection_class_name(EntityView);
+		putils_reflection_attributes(
+			putils_reflection_attribute(&EntityView::id),
+			putils_reflection_attribute(&EntityView::componentMask)
 		);
-		pmeta_get_methods();
-		pmeta_get_parents();
+		putils_reflection_methods();
+		putils_reflection_parents();
 	};
 
 	class Entity : public EntityView {
@@ -94,7 +94,7 @@ namespace kengine {
 template<typename T>
 T & kengine::Entity::attach() {
 	if (!has<T>()) {
-		const auto component = getId<T>();
+		static const auto component = getId<T>();
 		componentMask.set(component, true);
 		manager->addComponent(id, component);
 	}
@@ -107,7 +107,7 @@ void kengine::Entity::attach(T && comp) {
 
 	Component<Comp>::get(id) = FWD(comp);
 	if (!has<Comp>()) {
-		const auto component = getId<Comp>();
+		static const auto component = getId<Comp>();
 		componentMask.set(component, true);
 		manager->addComponent(id, component);
 	}
@@ -117,7 +117,7 @@ void kengine::Entity::attach(T && comp) {
 template<typename T>
 void kengine::Entity::detach() {
 	assert("No such component" && has<T>());
-	const auto component = getId<T>();
+	static const auto component = getId<T>();
 	componentMask.set(component, false);
 	manager->removeComponent(id, component);
 }

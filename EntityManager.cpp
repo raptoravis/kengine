@@ -1,6 +1,23 @@
+#include <filesystem>
 #include "EntityManager.hpp"
 
+#include "functions/OnTerminate.hpp"
+#include "functions/OnEntityRemoved.hpp"
+
+#ifndef KENGINE_MAX_SAVE_PATH_LENGTH
+# define KENGINE_MAX_SAVE_PATH_LENGTH 64
+#endif
+
+#ifndef KENGINE_MAX_COMPONENT_NAME_LENGTH
+# define KENGINE_MAX_COMPONENT_NAME_LENGTH 64
+#endif
+
 namespace kengine {
+	EntityManager::~EntityManager() {
+		for (const auto & [e, func] : getEntities<functions::OnTerminate>())
+			func();
+	}
+
 	Entity EntityManager::getEntity(Entity::ID id) {
 		detail::ReadLock l(_entitiesMutex);
 		return Entity(id, _entities[id].mask, this);
@@ -16,12 +33,35 @@ namespace kengine {
 	}
 
 	void EntityManager::removeEntity(Entity::ID id) {
-		detail::WriteLock l(_updatesMutex);
-		if (_updatesLocked) {
-			_removals.push_back({ id });
+		auto e = getEntity(id);
+		for (const auto & [_, func] : getEntities<functions::OnEntityRemoved>())
+			func(e);
+
+		Entity::Mask mask;
+		{
+			detail::ReadLock entities(_entitiesMutex);
+			mask = _entities[id].mask;
 		}
-		else
-			doRemove(id);
+
+		{
+			detail::ReadLock archetypes(_archetypesMutex);
+			const auto archetype = std::find_if(
+				_archetypes.begin(), _archetypes.end(),
+				[mask](const auto & a) { return a.mask == mask; }
+			);
+			archetype->remove(id);
+		}
+
+		{
+			detail::WriteLock entities(_entitiesMutex);
+			_entities[id].mask = 0;
+			_entities[id].active = false;
+			_entities[id].shouldActivateAfterInit = true;
+		}
+
+		detail::WriteLock l(_toReuseMutex);
+		_toReuse.emplace_back(id);
+		_toReuseSorted = false;
 	}
 
 	void EntityManager::setEntityActive(EntityView e, bool active) {
@@ -34,86 +74,10 @@ namespace kengine {
 		_entities[id].shouldActivateAfterInit = active;
 	}
 
-	void EntityManager::load(const char * directory) {
-		{
-			detail::WriteLock l(_archetypesMutex);
-			_archetypes.clear();
-		}
-
-		{
-			detail::WriteLock l(_toReuseMutex);
-			_toReuse.clear();
-		}
-
-		{
-			detail::ReadLock l(_entitiesMutex);
-			for (size_t i = 0; i < _entities.size(); ++i)
-				SystemManager::removeEntity(EntityView(i, _entities[i].mask));
-		}
-
-		{
-			detail::ReadLock l(_components.mutex);
-			for (const auto &[_, meta] : _components.map)
-				meta->load(directory);
-		}
-
-		std::ifstream f(putils::string<KENGINE_MAX_SAVE_PATH_LENGTH>("%s/entities.bin", directory));
-		assert(f);
-		size_t size;
-		f.read((char *)&size, sizeof(size));
-
-		{
-			detail::WriteLock l(_entitiesMutex);
-			_entities.resize(size);
-			f.read((char *)_entities.data(), size * sizeof(Entity::Mask));
-		}
-
-		{
-			detail::ReadLock l(_entitiesMutex);
-			for (size_t i = 0; i < _entities.size(); ++i) {
-				const auto mask = _entities[i].mask;
-				if (mask != 0) {
-					detail::WriteLock l(_updatesMutex);
-					updateMask(i, mask, true);
-					Entity e{ i, mask, this };
-					SystemManager::registerEntity(e);
-				}
-				else {
-					detail::WriteLock l(_toReuseMutex);
-					_toReuse.emplace_back(i);
-				}
-			}
-		}
-
-		SystemManager::load(directory);
-	}
-
-	void EntityManager::save(const char * directory) const {
-		SystemManager::save(directory);
-
-		putils::vector<bool, KENGINE_COMPONENT_COUNT> serializable;
-
-		{
-			detail::ReadLock l(_components.mutex);
-			serializable.resize(_components.map.size());
-			for (const auto &[_, meta] : _components.map)
-				serializable[meta->getId()] = meta->save(directory);
-		}
-
-		std::ofstream f(putils::string<KENGINE_MAX_SAVE_PATH_LENGTH>("%s/entities.bin", directory));
-		assert(f);
-
-		{
-			detail::ReadLock l(_entitiesMutex);
-			const auto size = _entities.size();
-			f.write((const char *)&size, sizeof(size));
-			for (auto [active, mask, _] : _entities) {
-				for (size_t i = 0; i < serializable.size(); ++i)
-					mask[i] = mask[i] & serializable[i];
-				f.write((const char *)&mask, sizeof(mask));
-			}
-		}
-	}
+	struct ComponentIDSave {
+		size_t id;
+		putils::string<KENGINE_MAX_COMPONENT_NAME_LENGTH> name;
+	};
 
 	Entity EntityManager::alloc() {
 		{
@@ -137,7 +101,7 @@ namespace kengine {
 			_toReuse.pop_back();
 		}
 
-#ifndef NDEBUG
+#ifndef KENGINE_NDEBUG
 		{
 			detail::ReadLock l(_archetypesMutex);
 			for (const auto & archetype : _archetypes) {
@@ -164,131 +128,42 @@ namespace kengine {
 	}
 
 	void EntityManager::updateHasComponent(Entity::ID id, size_t component, bool newHasComponent) {
-		{
-			detail::WriteLock l(_updatesMutex);
-			for (auto & update : _updates)
-				if (update.id == id) {
-					std::unique_lock<std::mutex> l(update.mutex);
-					update.newMask[component] = newHasComponent;
-					return;
-				}
-		}
-
-		Entity::Mask currentMask;
+		Entity::Mask oldMask;
 		{
 			detail::ReadLock l(_entitiesMutex);
-			currentMask = _entities[id].mask;
+			oldMask = _entities[id].mask;
 		}
 
-		auto updatedMask = currentMask;
+		auto updatedMask = oldMask;
 		updatedMask[component] = newHasComponent;
-		updateMask(id, updatedMask);
-	}
 
-	void EntityManager::updateMask(Entity::ID id, Entity::Mask newMask, bool ignoreOldMask) {
-		detail::WriteLock l(_updatesMutex);
-		if (_updatesLocked == 0)
-			doUpdateMask(id, newMask, ignoreOldMask);
-		else {
-			Update update;
-			update.id = id;
-			update.newMask = newMask;
-			update.ignoreOldMask = ignoreOldMask;
-			_updates.push_back(std::move(update));
+		assert(oldMask != updatedMask);
+
+		if (oldMask != 0) {
+			detail::ReadLock l(_archetypesMutex);
+
+			const auto archetype = std::find_if(
+				_archetypes.begin(), _archetypes.end(),
+				[oldMask](const auto & a) { return a.mask == oldMask; }
+			);
+			archetype->remove(id);
 		}
-	}
 
-	void EntityManager::doAllUpdates() {
-		// _updatesMutex already locked
-		for (const auto & update : _updates)
-			doUpdateMask(update.id, update.newMask, update.ignoreOldMask);
-		_updates.clear();
-
-		for (const auto removal : _removals)
-			doRemove(removal.id);
-		_removals.clear();
-	}
-
-	void EntityManager::doUpdateMask(Entity::ID id, Entity::Mask newMask, bool ignoreOldMask) {
-		// _updatesMutex already locked
-		const auto oldMask = ignoreOldMask ? 0 : _entities[id].mask;
-
-		int done = 0;
-		if (oldMask == 0) // Will not have to remove
-			++done;
-
-		{
+		if (updatedMask != 0) {
 			detail::WriteLock l(_archetypesMutex);
-			for (auto & collection : _archetypes) {
-				if (collection.mask == oldMask) {
-					const auto size = collection.entities.size();
-					if (size > 1) {
-						const auto it = std::find(collection.entities.begin(), collection.entities.end(), id);
-						std::iter_swap(it, collection.entities.begin() + size - 1);
-					}
-					collection.entities.pop_back();
-					collection.sorted = false;
-					++done;
-				}
 
-				if (collection.mask == newMask) {
-					collection.entities.emplace_back(id);
-					collection.sorted = false;
-					++done;
-				}
-
-				if (done == 2)
-					break;
-			}
-
-			if (done == 1)
-				_archetypes.emplace_back(newMask, id);
+			const auto archetype = std::find_if(
+				_archetypes.begin(), _archetypes.end(),
+				[updatedMask](const auto & a) { return a.mask == updatedMask; }
+			);
+			if (archetype != _archetypes.end())
+				archetype->add(id);
+			else
+				_archetypes.emplace_back(updatedMask, id);
 		}
 
 		detail::WriteLock l(_entitiesMutex);
-		_entities[id].mask = newMask;
-	}
-
-	void EntityManager::doRemove(Entity::ID id) {
-		Entity::Mask mask;
-		{
-			detail::ReadLock entities(_entitiesMutex);
-			mask = _entities[id].mask;
-		}
-
-		SystemManager::removeEntity(EntityView(id, mask));
-
-		{
-			detail::ReadLock entities(_entitiesMutex);
-			mask = _entities[id].mask;
-		}
-
-		{
-			detail::ReadLock archetypes(_archetypesMutex);
-			for (auto & collection : _archetypes) {
-				if (collection.mask == mask) {
-					detail::WriteLock archetype(collection.mutex);
-					const auto tmp = std::find(collection.entities.begin(), collection.entities.end(), id);
-					if (collection.entities.size() > 1) {
-						std::swap(*tmp, collection.entities.back());
-						collection.sorted = false;
-					}
-					collection.entities.pop_back();
-					break;
-				}
-			}
-		}
-
-		{
-			detail::WriteLock entities(_entitiesMutex);
-			_entities[id].mask = 0;
-			_entities[id].active = false;
-			_entities[id].shouldActivateAfterInit = true;
-		}
-
-		detail::WriteLock l(_toReuseMutex);
-		_toReuse.emplace_back(id);
-		_toReuseSorted = false;
+		_entities[id].mask = updatedMask;
 	}
 
 	/*
@@ -330,16 +205,46 @@ namespace kengine {
 		return EntityIterator{ em._entities.size(), em };
 	}
 
-	EntityManager::EntityCollection::EntityCollection(EntityManager & em) : em(em) {
-		detail::WriteLock l(em._updatesMutex);
-		++em._updatesLocked;
+	/*
+	** Archetype
+	*/
+
+	EntityManager::Archetype::Archetype(Entity::Mask mask, Entity::ID firstEntity)
+		: mask(mask), entities({ firstEntity })
+	{}
+
+	EntityManager::Archetype::Archetype(Archetype && rhs) {
+		mask = rhs.mask;
+		sorted = rhs.sorted;
+		detail::WriteLock l(rhs.mutex);
+		entities = std::move(rhs.entities);
 	}
 
-	EntityManager::EntityCollection::~EntityCollection() {
-		detail::WriteLock l(em._updatesMutex);
-		assert(em._updatesLocked != 0);
-		--em._updatesLocked;
-		if (em._updatesLocked == 0)
-			em.doAllUpdates();
+	EntityManager::Archetype::Archetype(const Archetype & rhs) {
+		mask = rhs.mask;
+		sorted = rhs.sorted;
+		detail::ReadLock l(rhs.mutex);
+		entities = rhs.entities;
+	}
+
+	void EntityManager::Archetype::add(Entity::ID id) {
+		detail::WriteLock l(mutex);
+		entities.push_back(id);
+		sorted = false;
+	}
+
+	void EntityManager::Archetype::remove(Entity::ID id) {
+		detail::WriteLock l(mutex);
+		if (!sorted)
+			sort();
+		const auto it = std::lower_bound(entities.begin(), entities.end(), id);
+		std::swap(*it, entities.back());
+		entities.pop_back();
+		sorted = false;
+	}
+
+	void EntityManager::Archetype::sort() {
+		std::sort(entities.begin(), entities.end(), std::less<Entity::ID>());
+		sorted = true;
 	}
 }

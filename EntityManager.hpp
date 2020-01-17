@@ -1,25 +1,39 @@
 #pragma once
 
-#ifndef KENGINE_MAX_SAVE_PATH_LENGTH
-# define KENGINE_MAX_SAVE_PATH_LENGTH 64
-#endif
-
 #include <vector>
-#include "SystemManager.hpp"
 #include "Component.hpp"
 #include "Entity.hpp"
+#include "ThreadPool.hpp"
+#include "EntityCreator.hpp"
+#include "functions/OnEntityCreated.hpp"
 
 namespace kengine {
-    class EntityManager : public SystemManager {
+	template<typename T>
+	struct no {
+		using CompType = T;
+	};
+
+	template<typename>
+	struct is_not : std::false_type {};
+
+	template<typename T>
+	struct is_not<no<T>> : std::true_type {};
+
+    class EntityManager : public putils::ThreadPool {
     public:
-		EntityManager(size_t threads = 0) : SystemManager(threads) {}
+		EntityManager(size_t threads = 0) : ThreadPool(threads) {
+			detail::components = &_components;
+		}
+		~EntityManager();
 
     public:
-		template<typename Func> // Func: void(Entity &);
+		template<typename Func> // Func: kengine::EntityCreator
         Entity createEntity(Func && postCreate) {
 			auto e = alloc();
 			postCreate(e);
-			SystemManager::registerEntity(e);
+
+			for (const auto & [_, f] : getEntities<functions::OnEntityCreated>())
+				f(e);
 
 			bool shouldActivate;
 			{
@@ -48,11 +62,8 @@ namespace kengine {
 		void setEntityActive(EntityView e, bool active);
 		void setEntityActive(Entity::ID id, bool active);
 
-    public:
-		void load(const char * directory = ".");
-
-		void save(const char * directory = ".") const;
-
+	public:
+		std::atomic<bool> running = true;
 
 	private:
 		struct Archetype {
@@ -61,7 +72,14 @@ namespace kengine {
 			bool sorted = true;
 			mutable detail::Mutex mutex;
 
-			Archetype(Entity::Mask mask, Entity::ID firstEntity) : mask(mask), entities({ firstEntity }) {}
+			Archetype(Entity::Mask mask, Entity::ID firstEntity);
+			Archetype() = default;
+			Archetype(Archetype &&);
+			Archetype(const Archetype &);
+
+			void add(Entity::ID id);
+			void remove(Entity::ID id);
+			void sort();
 
 			template<typename ... Comps>
 			bool matches() {
@@ -71,27 +89,27 @@ namespace kengine {
 						return false;
 				}
 
-				if (!sorted) {
+				bool good = true;
+				putils::for_each_type<Comps...>([&](auto && type) {
+					using T = putils_wrapped_type(type);
+
+					if constexpr (kengine::is_not<T>()) {
+						using CompType = typename T::CompType;
+						const bool hasComp = mask.test(Component<CompType>::id());
+						good &= !hasComp;
+					}
+					else {
+						const bool hasComp = mask.test(Component<T>::id());
+						good &= hasComp;
+					}
+				});
+
+				if (good && !sorted) {
 					detail::WriteLock l(mutex);
-					std::sort(entities.begin(), entities.end(), std::greater<Entity::ID>());
-					sorted = true;
+					sort();
 				}
 
-				bool good = true;
-				pmeta_for_each(Comps, [&](auto && type) {
-					using CompType = pmeta_wrapped(type);
-					good &= mask.test(Component<CompType>::id());
-				});
 				return good;
-			}
-
-			Archetype() = default;
-			Archetype(Archetype && rhs) = default;
-			Archetype(const Archetype & rhs) {
-				mask = rhs.mask;
-				sorted = rhs.sorted;
-				detail::ReadLock l(rhs.mutex);
-				entities = rhs.entities;
 			}
 		};
 
@@ -107,9 +125,6 @@ namespace kengine {
 
 			EntityIterator begin() const;
 			EntityIterator end() const;
-
-			EntityCollection(EntityManager & em);
-			~EntityCollection();
 
 			EntityManager & em;
 		};
@@ -129,7 +144,7 @@ namespace kengine {
 
 				ComponentIterator & operator++() {
 					++currentEntity;
-					const auto & archetype = em._archetypes[currentType];
+					auto & archetype = em._archetypes[currentType];
 
 					{
 						detail::ReadLock l(archetype.mutex);
@@ -155,16 +170,26 @@ namespace kengine {
 				// Use `<` as it will only be compared with `end()`, and there is a risk that new entities have been added since `end()` was called
 				bool operator!=(const ComponentIterator & rhs) const { return currentType < rhs.currentType || currentEntity < rhs.currentEntity; }
 
+				template<typename T>
+				static T & get(Entity & e) {
+					if constexpr (kengine::is_not<T>()) {
+						static T ret;
+						return ret;
+					}
+					else
+						return e.get<T>();
+				};
+
 				std::tuple<Entity, Comps &...> operator*() const {
 					detail::ReadLock l(em._archetypesMutex);
 					const auto & archetype = em._archetypes[currentType];
 
 					detail::ReadLock l2(archetype.mutex);
 					Entity e(archetype.entities[currentEntity], archetype.mask, &em);
-					return std::make_tuple(e, std::ref(e.get<Comps>())...);
+					return std::make_tuple(e, std::ref(get<Comps>(e))...);
 				}
 
-				kengine::EntityManager & em;
+				EntityManager & em;
 				size_t currentType;
 				size_t currentEntity;
 			};
@@ -196,19 +221,6 @@ namespace kengine {
 				return ComponentIterator{ em, em._archetypes.size(), 0 };
 			}
 
-			ComponentCollection(EntityManager & em) : em(em) {
-				detail::WriteLock l(em._updatesMutex);
-				++em._updatesLocked;
-			}
-
-			~ComponentCollection() {
-				detail::WriteLock l(em._updatesMutex);
-				assert(em._updatesLocked != 0);
-				--em._updatesLocked;
-				if (em._updatesLocked == 0)
-					em.doAllUpdates();
-			}
-
 			EntityManager & em;
 		};
 
@@ -216,42 +228,6 @@ namespace kengine {
 		template<typename ... Comps>
 		auto getEntities() {
 			return ComponentCollection<Comps...>{ *this };
-		}
-
-    public:
-        template<typename RegisterWith, typename ...Types>
-        void registerTypes() {
-            if constexpr (!std::is_same<RegisterWith, nullptr_t>::value) {
-				auto & s = getSystem<RegisterWith>();
-				s.template registerTypes<Types...>();
-            }
-		}
-
-	public:
-		// In the following functions, `Func` must inherit from kengine::functions::BaseFunction, i.e. have:
-		//		a `Signature` type alias for a function pointer type
-		//		a `Signature funcPtr;` attribute
-
-		template<typename Comp, typename Func>
-		void registerComponentFunction(Func func) const {
-			Component<Comp>::registerFunction(func);
-		}
-
-		using FunctionMapCollection = putils::vector<FunctionMap *, KENGINE_COMPONENT_COUNT>;
-		FunctionMapCollection getComponentFunctionMaps() const {
-			FunctionMapCollection ret;
-
-			{
-				detail::ReadLock l(_components.mutex);
-				for (const auto & p : _components.map)
-					ret.push_back(&p.second->funcs);
-			}
-
-			std::sort(ret.begin(), ret.end(), [](const FunctionMap * lhs, const FunctionMap * rhs) {
-				return strcmp(lhs->name, rhs->name) < 0;
-			});
-
-			return ret;
 		}
 
 	private:
@@ -262,11 +238,6 @@ namespace kengine {
 		void addComponent(Entity::ID id, size_t component);
 		void removeComponent(Entity::ID id, size_t component);
 		void updateHasComponent(Entity::ID id, size_t component, bool newHasComponent);
-		void updateMask(Entity::ID id, Entity::Mask newMask, bool ignoreOldMask = false);
-
-		void doAllUpdates();
-		void doUpdateMask(Entity::ID id, Entity::Mask newMask, bool ignoreOldMask);
-		void doRemove(Entity::ID id);
 
 	private:
 		struct EntityMetadata {
@@ -284,34 +255,10 @@ namespace kengine {
 		bool _toReuseSorted = true;
 		mutable detail::Mutex _toReuseMutex;
 
-		struct Update {
-			Entity::ID id;
-			Entity::Mask newMask;
-			bool ignoreOldMask;
-			std::mutex mutex;
-
-			Update() = default;
-			Update(Update &&) = default;
-			Update(const Update & rhs) {
-				id = rhs.id;
-				newMask = rhs.newMask;
-				ignoreOldMask = rhs.ignoreOldMask;
-			}
-		};
-		std::vector<Update> _updates;
-
-		struct Removal {
-			Entity::ID id;
-		};
-		std::vector<Removal> _removals;
-
-		size_t _updatesLocked = 0;
-		mutable detail::Mutex _updatesMutex;
-
 	private:
 		mutable detail::GlobalCompMap _components; // Mutable to lock mutex
 
-	public: // Reserved to systems
-		detail::GlobalCompMap & __getComponentMap() { return _components; }
+	public: // Reserved to PluginHelper::initPlugin
+		detail::GlobalCompMap & _getComponentMap() { return _components; }
 	};
 }
